@@ -8,10 +8,6 @@
 #   {{SSH_USER}}         - SSH user on the remote server
 #   {{SSH_HOST}}         - SSH hostname or IP
 #   {{SSH_PORT}}         - SSH port (usually 22)
-#   {{KEY_FILE}}         - Path to the private key on the host, e.g. ~/.ssh/id_rsa.
-#                          Documentation only — the commands use ddev-ssh-agent,
-#                          not this path directly. It records which key is
-#                          expected for this environment.
 #   {{REMOTE_PATH}}      - Absolute path to the WordPress project root on the
 #                          server (the directory containing wp-config.php, or
 #                          the parent of `web/` in a Bedrock-style layout)
@@ -24,14 +20,13 @@
 #                          (must be writable by {{SSH_USER}})
 
 environment_variables:
-  ssh_user: {{SSH_USER}}
-  ssh_host: {{SSH_HOST}}
-  ssh_port: {{SSH_PORT}}
-  key_file: {{KEY_FILE}}
-  remote_path: {{REMOTE_PATH}}
-  wp_cwd: {{WP_CWD}}
-  uploads_subpath: {{UPLOADS_SUBPATH}}
-  backup_path: {{BACKUP_PATH}}
+  ssh_user: { { SSH_USER } }
+  ssh_host: { { SSH_HOST } }
+  ssh_port: { { SSH_PORT } }
+  remote_path: { { REMOTE_PATH } }
+  wp_cwd: { { WP_CWD } }
+  uploads_subpath: { { UPLOADS_SUBPATH } }
+  backup_path: { { BACKUP_PATH } }
 
 auth_command:
   command: |
@@ -41,7 +36,6 @@ auth_command:
 db_pull_command:
   command: |
     set -eu -o pipefail
-    ssh -p${ssh_port} ${ssh_user}@${ssh_host} "mkdir -p ${backup_path}"
     ssh -p${ssh_port} ${ssh_user}@${ssh_host} "cd ${remote_path}/${wp_cwd} && wp db export - | gzip > ${backup_path}/db.sql.gz"
     rsync -rvz -e "ssh -p\"${ssh_port}\"" "${ssh_user}"@"${ssh_host}":${backup_path}/db.sql.gz /var/www/html/.ddev/.downloads/
     ssh -p${ssh_port} ${ssh_user}@${ssh_host} "rm -f ${backup_path}/db.sql.gz"

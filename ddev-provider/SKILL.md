@@ -36,9 +36,8 @@ Ask the user for what you don't already know. Reasonable things to offer default
 | SSH user | — (always ask) |
 | SSH host | — (always ask; may be an IP, FQDN, or an `~/.ssh/config` alias) |
 | SSH port | `22` |
-| Key file | `~/.ssh/id_rsa` (project may have a project-specific `.pem` in `~/.ssh/`) |
 | Remote path | — (always ask; the composer/project root on the server) |
-| Backup path | `/home/<SSH_USER>/backups/ddev-tmp` |
+| Backup path | Same as Remote path — don't prompt. The dump is written there, rsynced, then removed. |
 
 **Drupal-specific:**
 - `FILES_SUBPATH` — default `web/sites/default/files`. Change if the project uses a different docroot (e.g. `docroot/sites/default/files`, or `sites/default/files` for non-composer sites).
@@ -51,21 +50,40 @@ If the user only has an `~/.ssh/config` alias (e.g. `islandhealth-prod`) and no 
 
 ## Step 3 — Write the file
 
-1. Read the matching template from `templates/`.
+1. Read the matching template. Templates are located at `~/.claude/skills/ddev-provider/templates/` (resolve `~` to the user's home directory for an absolute path).
 2. Replace every `{{PLACEHOLDER}}` token with the gathered value.
 3. Write the result to `<project-root>/.ddev/providers/<environment-name>.yaml`.
 4. Do NOT include the DDEV-generated sentinel comment (`#ddev-generated`) — that comment signals DDEV can overwrite the file. Custom providers must omit it.
 
 Verify: grep the output for any remaining `{{` — if any, you missed a placeholder.
 
-## Step 4 — Tell the user what's next
+## Step 4 — Wire `ddev auth ssh` into `post-start`
+
+Edit `.ddev/config.yaml` so SSH keys are loaded into `ddev-ssh-agent` automatically after every `ddev start`, removing the need to run `ddev auth ssh` manually before each pull.
+
+Desired entry:
+
+```yaml
+hooks:
+  post-start:
+    - exec-host: ddev auth ssh
+```
+
+Merge carefully:
+
+- If `hooks:` and `post-start:` already exist, append `- exec-host: ddev auth ssh` to the existing list (don't replace).
+- If `hooks:` exists but has no `post-start:`, add the `post-start:` key with this one entry.
+- If `hooks:` doesn't exist, append the block above.
+- If the entry is already present, skip.
+
+## Step 5 — Tell the user what's next
 
 ```
-ddev auth ssh
+ddev restart
 ddev pull <environment-name>
 ```
 
-Remind them that `ddev auth ssh` only needs to run once per DDEV session (or after a reboot). If they're pulling into a freshly started project, they may need `ddev start` first.
+`ddev restart` triggers the new post-start hook so `ddev auth ssh` runs once and loads their keys for the session.
 
 ## Notes on the template shape
 
@@ -75,9 +93,9 @@ Remind them that `ddev auth ssh` only needs to run once per DDEV session (or aft
 
 ## Tip: per-project key auto-loading (optional)
 
-By default, the expected workflow is `ddev auth ssh` (once per session, loads all keys from `~/.ssh/`) and then `ddev pull <env>`. This is simple and covers most users.
+By default (after Step 4), `ddev start` runs `ddev auth ssh` via the `post-start` hook, loading all keys from `~/.ssh/` into `ddev-ssh-agent`. This is simple and covers most users.
 
-If the user prefers to load only a specific key for this project — useful if they have many keys and hit `Too many authentication failures` / SSH `MaxAuthTries`, or they just want per-project isolation — they can add this to `.ddev/config.local.yaml` (gitignored by default, so teammates are unaffected):
+If the user prefers to load only a specific key for this project — useful if they have many keys and hit `Too many authentication failures` / SSH `MaxAuthTries`, or they just want per-project isolation — they can override in `.ddev/config.local.yaml` (gitignored by default, so teammates are unaffected):
 
 ```yaml
 hooks:
@@ -85,7 +103,7 @@ hooks:
     - exec-host: ddev auth ssh -f ~/.ssh/<keyfile>
 ```
 
-DDEV merges `config.local.yaml` with the committed `config.yaml`; `post-start` fires after every `ddev start`. The `key_file:` value in the provider's `environment_variables` is exactly the path to use here — it's documented for this reason.
+DDEV merges `config.local.yaml` with the committed `config.yaml`; `post-start` fires after every `ddev start`. Ask the user for the key path at that point — don't prompt for it up front.
 
 Don't write this file from the skill. Mention it only if the user explicitly asks about per-project key loading, or if they've hit a `MaxAuthTries` / "Too many authentication failures" error while running `ddev pull`.
 
