@@ -20,13 +20,13 @@
 #                          (must be writable by {{SSH_USER}})
 
 environment_variables:
-  ssh_user: { { SSH_USER } }
-  ssh_host: { { SSH_HOST } }
-  ssh_port: { { SSH_PORT } }
-  remote_path: { { REMOTE_PATH } }
-  wp_cwd: { { WP_CWD } }
-  uploads_subpath: { { UPLOADS_SUBPATH } }
-  backup_path: { { BACKUP_PATH } }
+  ssh_user: {{SSH_USER}}
+  ssh_host: {{SSH_HOST}}
+  ssh_port: {{SSH_PORT}}
+  remote_path: {{REMOTE_PATH}}
+  wp_cwd: {{WP_CWD}}
+  uploads_subpath: {{UPLOADS_SUBPATH}}
+  backup_path: {{BACKUP_PATH}}
 
 auth_command:
   command: |

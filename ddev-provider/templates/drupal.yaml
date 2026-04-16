@@ -16,11 +16,11 @@
 #                          Default: web/sites/default/files
 
 environment_variables:
-  ssh_user: { { SSH_USER } }
-  ssh_host: { { SSH_HOST } }
-  ssh_port: { { SSH_PORT } }
-  remote_path: { { REMOTE_PATH } }
-  backup_path: { { BACKUP_PATH } }
+  ssh_user: {{SSH_USER}}
+  ssh_host: {{SSH_HOST}}
+  ssh_port: {{SSH_PORT}}
+  remote_path: {{REMOTE_PATH}}
+  backup_path: {{BACKUP_PATH}}
 
 auth_command:
   command: |
