@@ -51,10 +51,11 @@ If the user only has an `~/.ssh/config` alias (e.g. `islandhealth-prod`) and no 
 
 ## Step 3 — Write the file
 
-1. Read the matching template. Templates are located at `~/.claude/skills/ddev-setup/templates/` (resolve `~` to the user's home directory for an absolute path).
-2. Replace every `{{PLACEHOLDER}}` token with the gathered value.
-3. Write the result to `<project-root>/.ddev/providers/<environment-name>.yaml`.
-4. Do NOT include the DDEV-generated sentinel comment (`#ddev-generated`) — that comment signals DDEV can overwrite the file. Custom providers must omit it.
+1. **Check if the target file already exists.** If `<project-root>/.ddev/providers/<environment-name>.yaml` exists, **STOP**. Do not overwrite it under any circumstances — it may contain hand-tuned settings (custom backup paths, `stage_file_proxy` no-ops, SSH-alias forms) that the template cannot reproduce. This rule is absolute for `prod.yaml` in particular: production providers are the highest-risk to clobber. Report the existing file to the user, show its contents, and ask whether they want to (a) leave it alone, (b) edit specific fields in place, or (c) explicitly confirm a full rewrite by deleting the file themselves first. Never use `Write` to replace it.
+2. Read the matching template. Templates are located at `~/.claude/skills/ddev-setup/templates/` (resolve `~` to the user's home directory for an absolute path).
+3. Replace every `{{PLACEHOLDER}}` token with the gathered value.
+4. Write the result to `<project-root>/.ddev/providers/<environment-name>.yaml`.
+5. Do NOT include the DDEV-generated sentinel comment (`#ddev-generated`) — that comment signals DDEV can overwrite the file. Custom providers must omit it.
 
 Verify: grep the output for any remaining `{{` — if any, you missed a placeholder.
 
