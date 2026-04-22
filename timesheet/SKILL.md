@@ -225,7 +225,7 @@ From this data:
 3. Fuzzy-match each log project name against the Harvest project names — match on keywords, ignoring case and punctuation. For example, "clientportal" should match "Client Portal" or similar.
 4. Identify the **internal project** (from `.local-context.md`) — find its ID in the project list. This is used for two purposes:
    - **Fallback**: any log entry whose project can't be matched gets assigned here.
-   - **Daily admin entry**: for every day being processed, automatically add a 1-hour entry to this project with the **admin task** (from `.local-context.md`) and a blank comment. This entry should always appear in the summary table.
+   - **Daily admin entry**: for every **weekday** (Mon–Fri) being processed, automatically add a 1-hour entry to this project with the **admin task** (from `.local-context.md`) and a blank comment. This entry should always appear in the summary table. Do **not** add an admin entry on weekends (Sat/Sun), even if the user logged work on those days.
 
 The API paginates at 100 results. If `next_page` is present in the Step 2 project response, fetch subsequent pages in a follow-up call. In practice, most users have fewer than 100 active project assignments.
 
