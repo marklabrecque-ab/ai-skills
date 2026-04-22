@@ -5,27 +5,19 @@
 # `ddev auth ssh` once per DDEV session before `ddev pull <name>`.
 #
 # Placeholders (replace all `{{...}}` before committing):
-#   {{SSH_USER}}         - SSH user on the remote server
-#   {{SSH_HOST}}         - SSH hostname or IP
-#   {{SSH_PORT}}         - SSH port (usually 22)
-#   {{REMOTE_PATH}}      - Absolute path to the WordPress project root on the
-#                          server (the directory containing wp-config.php, or
-#                          the parent of `web/` in a Bedrock-style layout)
-#   {{WP_CWD}}           - Path (relative to {{REMOTE_PATH}}) where wp-cli runs.
-#                          Use `web` for Bedrock, `.` for a standard WP layout.
-#   {{UPLOADS_SUBPATH}}  - Path from {{REMOTE_PATH}} to wp-content/uploads.
-#                          Default: web/wp-content/uploads (Bedrock) or
-#                          wp-content/uploads (standard WP).
-#   {{BACKUP_PATH}}      - Absolute path on the server for temporary dump files
-#                          (must be writable by {{SSH_USER}})
+#   {{SSH_USER}}     - SSH user on the remote server
+#   {{SSH_HOST}}     - SSH hostname or IP
+#   {{SSH_PORT}}     - SSH port (usually 22)
+#   {{REMOTE_PATH}}  - Absolute path to the WordPress project root on the
+#                      server (the directory containing wp-config.php)
+#   {{BACKUP_PATH}}  - Absolute path on the server for temporary dump files
+#                      (must be writable by {{SSH_USER}})
 
 environment_variables:
   ssh_user: {{SSH_USER}}
   ssh_host: {{SSH_HOST}}
   ssh_port: {{SSH_PORT}}
   remote_path: {{REMOTE_PATH}}
-  wp_cwd: {{WP_CWD}}
-  uploads_subpath: {{UPLOADS_SUBPATH}}
   backup_path: {{BACKUP_PATH}}
 
 auth_command:
@@ -36,7 +28,7 @@ auth_command:
 db_pull_command:
   command: |
     set -eu -o pipefail
-    ssh -p${ssh_port} ${ssh_user}@${ssh_host} "cd ${remote_path}/${wp_cwd} && wp db export - | gzip > ${backup_path}/db.sql.gz"
+    ssh -p${ssh_port} ${ssh_user}@${ssh_host} "cd ${remote_path} && wp db export - | gzip > ${backup_path}/db.sql.gz"
     rsync -rvz -e "ssh -p\"${ssh_port}\"" "${ssh_user}"@"${ssh_host}":${backup_path}/db.sql.gz /var/www/html/.ddev/.downloads/
     ssh -p${ssh_port} ${ssh_user}@${ssh_host} "rm -f ${backup_path}/db.sql.gz"
   service: web
@@ -44,7 +36,7 @@ db_pull_command:
 files_pull_command:
   command: |
     set -eu -o pipefail
-    rsync -rvz -e "ssh -p${ssh_port}" --progress ${ssh_user}@${ssh_host}:${remote_path}/${uploads_subpath}/ /var/www/html/${uploads_subpath}/
+    rsync -avz -e "ssh -p${ssh_port}" --progress ${ssh_user}@${ssh_host}:${remote_path}/wp-content/uploads/ /var/www/html/wp-content/uploads/
   service: web
 
 # Pushing a database or files to a remote environment is dangerous and not

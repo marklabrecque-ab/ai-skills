@@ -1,11 +1,16 @@
 ---
-name: ddev-provider
-description: Creates DDEV provider YAML files (.ddev/providers/*.yaml) for pulling databases and files from remote servers. Use when the user wants to set up `ddev pull`, add a new environment (prod/stage/dev/cert) to a DDEV project, configure database and files sync from a remote server, fix a missing or broken provider, or mentions needing a "DDEV provider". The skill detects the project's CMS (Drupal vs WordPress) from the codebase and selects the correct template — drush-based for Drupal, wp-cli-based for WordPress — then substitutes the connection details.
+name: ddev-setup
+description: Sets up a functional DDEV environment for a Drupal or WordPress project. Creates DDEV provider YAML files (.ddev/providers/*.yaml) for `ddev pull`, wires `ddev auth ssh` into post-start, and for WordPress projects bootstraps a committed `wp-config-local.php` + `wp-config-override.php` pair so fresh clones boot cleanly and `$table_prefix` (or similar) can be overridden last-in-cascade. Use when the user wants to set up `ddev pull`, add a new environment (prod/stage/dev/cert) to a DDEV project, configure database and files sync from a remote server, fix a missing or broken provider, bootstrap a WordPress wp-config for a fresh clone, or mentions needing a "DDEV provider" or "DDEV setup". The skill detects the project's CMS (Drupal vs WordPress) from the codebase and selects the correct templates.
 ---
 
-# DDEV Provider
+# DDEV Setup
 
-Generate a `.ddev/providers/<name>.yaml` file so `ddev pull <name>` can sync a database and user-uploaded files from a remote server into the local DDEV environment. Templates live in `templates/` alongside this file.
+Bring a Drupal or WordPress project to a functional DDEV state. Two concerns:
+
+1. **Provider file** — `.ddev/providers/<name>.yaml` so `ddev pull <name>` can sync a database and user-uploaded files from a remote server.
+2. **WordPress wp-config bootstrap** (WordPress only) — commit a `wp-config-local.php` that DDEV copies into `wp-config.php` on first start if it's missing, plus a `wp-config-override.php` that's included last in the config cascade so per-project overrides (notably `$table_prefix`) win.
+
+Templates live in `templates/` alongside this file.
 
 ## When to use
 
@@ -21,7 +26,7 @@ From the project root, pick the matching template:
 | Signal | CMS | Template |
 |---|---|---|
 | `composer.json` contains `"drupal/core"` or `"drupal/recommended-project"` | Drupal | `templates/drupal.yaml` |
-| `wp-config.php`, `web/wp-config.php`, or `composer.json` contains `"roots/bedrock"` / `"johnpbloch/wordpress"` | WordPress | `templates/wordpress.yaml` |
+| `wp-config.php` at the project root, or `composer.json` contains `"johnpbloch/wordpress"` | WordPress | `templates/wordpress.yaml` |
 | Both or neither | Ask the user | — |
 
 Don't guess. If the signals conflict (rare, e.g. a composite site), ask which one this provider is for.
@@ -42,15 +47,11 @@ Ask the user for what you don't already know. Reasonable things to offer default
 **Drupal-specific:**
 - `FILES_SUBPATH` — default `web/sites/default/files`. Change if the project uses a different docroot (e.g. `docroot/sites/default/files`, or `sites/default/files` for non-composer sites).
 
-**WordPress-specific:**
-- `WP_CWD` — `web` for Bedrock (detected: `roots/bedrock` in composer.json), `.` for a standard WordPress layout.
-- `UPLOADS_SUBPATH` — `web/wp-content/uploads` for Bedrock, `wp-content/uploads` for standard WP.
-
 If the user only has an `~/.ssh/config` alias (e.g. `islandhealth-prod`) and no separate user/port/keyfile, warn them: `affinity-clone` requires both a `*HOST*` and a `*USER*` env var in the provider file. Either resolve the alias (`ssh -G <alias> | grep -E '^(user|hostname|port|identityfile)'`) and fill the fields, or leave it — but `affinity-clone`'s preflight parser will refuse the file.
 
 ## Step 3 — Write the file
 
-1. Read the matching template. Templates are located at `~/.claude/skills/ddev-provider/templates/` (resolve `~` to the user's home directory for an absolute path).
+1. Read the matching template. Templates are located at `~/.claude/skills/ddev-setup/templates/` (resolve `~` to the user's home directory for an absolute path).
 2. Replace every `{{PLACEHOLDER}}` token with the gathered value.
 3. Write the result to `<project-root>/.ddev/providers/<environment-name>.yaml`.
 4. Do NOT include the DDEV-generated sentinel comment (`#ddev-generated`) — that comment signals DDEV can overwrite the file. Custom providers must omit it.
@@ -76,14 +77,39 @@ Merge carefully:
 - If `hooks:` doesn't exist, append the block above.
 - If the entry is already present, skip.
 
-## Step 5 — Tell the user what's next
+## Step 5 — WordPress only: bootstrap `wp-config.php`
+
+Skip for Drupal.
+
+Goal: on a fresh clone, `ddev start` should produce a working `wp-config.php` automatically, and per-project overrides (e.g. `$table_prefix`) should apply after every other config file has loaded.
+
+Approach:
+
+1. Copy `templates/wp-config-local.php` → `<wp-root>/wp-config-local.php` (committed).
+2. Copy `templates/wp-config-override.php` → `<wp-root>/wp-config-override.php` (committed). Edit it to set whatever the user actually needs overridden (ask — the common one is `$table_prefix`).
+3. Ensure `wp-config.php` is gitignored if it isn't already (it's the generated/local file).
+4. Add a `pre-start` hook to `.ddev/config.yaml` so the local template is copied into place when `wp-config.php` is absent:
+
+   ```yaml
+   hooks:
+     pre-start:
+       - exec-host: test -f <wp-root>/wp-config.php || cp <wp-root>/wp-config-local.php <wp-root>/wp-config.php
+   ```
+
+   `<wp-root>` is the project root for a standard WordPress layout. Merge with any existing `hooks:` block (same rules as Step 4 for `post-start`).
+
+5. Tell the user to edit `wp-config-override.php` to set their override (e.g. `$table_prefix = 'custom_';`) and commit both files.
+
+If the user has an existing `wp-config.php` they want to keep, leave it alone and just add the `wp-config-override.php` + a `require_once` at the end of their `wp-config.php` (before `wp-settings.php`).
+
+## Step 6 — Tell the user what's next
 
 ```
 ddev restart
 ddev pull <environment-name>
 ```
 
-`ddev restart` triggers the new post-start hook so `ddev auth ssh` runs once and loads their keys for the session.
+`ddev restart` triggers the new post-start hook so `ddev auth ssh` runs once and loads their keys for the session. On a fresh clone it will also run the `pre-start` hook that seeds `wp-config.php` from `wp-config-local.php` (WordPress).
 
 ## Notes on the template shape
 
