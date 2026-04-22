@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""
+Compare two screenshot runs for {{PROJECT_NAME}}.
+
+Usage:
+  python3 .claude/skills/compare-{{SLUG}}-screenshots/scripts/compare.py \\
+    --run-a scratch/screenshots/RUN_A --run-b scratch/screenshots/RUN_B
+
+Reads the page list from ../screenshot-{{SLUG}}/pages.json so the list is
+never duplicated.
+"""
+
+import argparse
+import json
+import os
+import struct
+import sys
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+SKILL_DIR = SCRIPT_DIR.parent
+PAGES_FILE = SKILL_DIR.parent / 'screenshot-{{SLUG}}' / 'pages.json'
+
+
+def png_dimensions(path):
+  with open(path, 'rb') as f:
+    f.read(8)  # PNG signature
+    f.read(4)  # IHDR chunk length
+    f.read(4)  # 'IHDR'
+    w = struct.unpack('>I', f.read(4))[0]
+    h = struct.unpack('>I', f.read(4))[0]
+  return w, h
+
+
+def main():
+  parser = argparse.ArgumentParser(description='Compare two screenshot runs')
+  parser.add_argument('--run-a', required=True, help='Path to baseline run dir')
+  parser.add_argument('--run-b', required=True, help='Path to comparison run dir')
+  parser.add_argument('--size-threshold', type=int, default=50,
+                      help='Byte diff above this is flagged (default: 50)')
+  args = parser.parse_args()
+
+  if not PAGES_FILE.exists():
+    print(f'ERROR: pages.json not found at {PAGES_FILE}', file=sys.stderr)
+    print('Has the screenshot-{{SLUG}} skill been generated?', file=sys.stderr)
+    sys.exit(1)
+
+  pages = [p['name'] for p in json.loads(PAGES_FILE.read_text())]
+  run_a = Path(args.run_a)
+  run_b = Path(args.run_b)
+
+  print(f"{'Page':<40} {'Run A':>12} {'Run B':>12} {'Diff':>8}  Notes")
+  print('-' * 90)
+  flagged = []
+
+  for p in pages:
+    pa = run_a / f'{p}.png'
+    pb = run_b / f'{p}.png'
+    if not pa.exists():
+      print(f'{p:<40}  MISSING in Run A')
+      continue
+    if not pb.exists():
+      print(f'{p:<40}  MISSING in Run B')
+      continue
+    sa = os.path.getsize(pa)
+    sb = os.path.getsize(pb)
+    wa, ha = png_dimensions(pa)
+    wb, hb = png_dimensions(pb)
+    diff = abs(sa - sb)
+    if (wa, ha) != (wb, hb):
+      note = f'DIM MISMATCH A={wa}x{ha} B={wb}x{hb}'
+      flagged.append((p, note))
+    elif diff > args.size_threshold:
+      note = '<-- CHECK'
+      flagged.append((p, ''))
+    else:
+      note = 'ok'
+    print(f'{p:<40} {sa:>12,} {sb:>12,} {diff:>8,}  {note}')
+
+  print()
+  print(f'Flagged for visual inspection: {len(flagged)}')
+  for p, note in flagged:
+    print(f'  {p}  {note}')
+
+
+if __name__ == '__main__':
+  main()

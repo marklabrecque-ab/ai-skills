@@ -1,0 +1,104 @@
+---
+name: compare-{{SLUG}}-screenshots
+description: >
+  Compare two sets of {{PROJECT_NAME}} screenshots to detect visual
+  differences. Use this skill when the user asks to compare, diff, or check
+  for differences between two screenshot runs — e.g. ddev vs production, or
+  before vs after an upgrade. Requires screenshots to already exist in
+  scratch/screenshots/ — run the screenshot-{{SLUG}} skill first if needed.
+---
+
+# {{PROJECT_NAME}} Screenshot Comparison Skill
+
+Compares two screenshot directories. Two-pass approach: fast size/dimension
+check across all pages, then visual inspection only for flagged pages.
+
+The page list is read from `../screenshot-{{SLUG}}/pages.json` — do not
+duplicate it here.
+
+## Prerequisites
+
+Two screenshot directories must exist under `scratch/screenshots/`. List them:
+
+```bash
+ls scratch/screenshots/
+```
+
+## Step-by-step
+
+### Step 1 — Identify the two runs
+
+Ask the user which two runs to compare, or infer from context:
+- Same target, different times: `ddev-...` vs `ddev-...`
+- Different targets: `ddev-...` vs `production-...`
+- Before/after: `production-before` vs `production-after`
+
+Call them **Run A** (baseline) and **Run B** (comparison).
+
+### Step 2 — Run the compare script
+
+```bash
+python3 .claude/skills/compare-{{SLUG}}-screenshots/scripts/compare.py \
+  --run-a scratch/screenshots/RUN_A \
+  --run-b scratch/screenshots/RUN_B
+```
+
+The script prints a table of page/size/dimension/diff and a list of flagged
+pages that warrant visual inspection.
+
+### Step 3 — Interpret size results
+
+| Byte difference | Meaning |
+|-----------------|---------|
+| 0 bytes | Byte-for-byte identical |
+| 1–50 bytes | PNG metadata variation — safe to ignore |
+| > 50 bytes | Warrants visual inspection |
+| Dimension mismatch | Page height changed — definite layout difference |
+
+### Step 4 — Visual inspection
+
+For each flagged page, use the `Read` tool to load both PNGs and describe
+differences. Look for: missing/changed images, layout shifts, text diffs,
+colour changes, header/footer changes.
+
+**For more than ~5 flagged pages**, delegate to a Haiku subagent:
+
+```
+Compare screenshots for these pages: [list].
+Run A: scratch/screenshots/RUN_A/
+Run B: scratch/screenshots/RUN_B/
+Use the Read tool to load both PNGs for each page and describe differences.
+Group by: identical | trivial | real difference.
+Return a structured report.
+```
+
+### Step 5 — Report
+
+```
+## Screenshot Comparison: RUN_A vs RUN_B
+
+### Summary
+N/M pages show differences.
+
+### Identical or trivial (N pages)
+- ...
+
+### Differences found (N pages)
+- page-name: [description]
+```
+
+## Cleaning up old runs
+
+```bash
+rm -rf scratch/screenshots/ddev-*                # one target
+rm -rf scratch/screenshots/*-2026-04-20-*        # one date
+rm -rf scratch/screenshots/ddev-2026-04-20-1432  # one run
+```
+
+## Notes
+
+- **PNG metadata**: 1–50 byte diffs between runs are normal.
+- **Dynamic content**: News/events/search pages show DB content — diffs may
+  be data, not code.
+- **Screenshot freshness**: If the site changed between runs, re-run
+  screenshot-{{SLUG}} before comparing.
