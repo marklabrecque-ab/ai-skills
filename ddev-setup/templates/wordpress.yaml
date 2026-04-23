@@ -36,7 +36,10 @@ db_pull_command:
 files_pull_command:
   command: |
     set -eu -o pipefail
-    rsync -avz -e "ssh -p${ssh_port}" --progress ${ssh_user}@${ssh_host}:${remote_path}/wp-content/uploads/ /var/www/html/wp-content/uploads/
+    # --size-only: rsync's default size+mtime check re-transfers files every pull
+    # because mutagen/container mounts don't preserve mtimes faithfully. Uploads
+    # are immutable (same name = same content), so size comparison is safe.
+    rsync -avz --size-only -e "ssh -p${ssh_port}" ${ssh_user}@${ssh_host}:${remote_path}/wp-content/uploads/ /var/www/html/wp-content/uploads/
   service: web
 
 # Pushing a database or files to a remote environment is dangerous and not
