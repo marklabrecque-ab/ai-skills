@@ -118,7 +118,7 @@ The Harvest API credentials are available as environment variables:
 - `HARVEST_TOKEN` — Personal Access Token
 - `HARVEST_ACCOUNT_ID` — Harvest account ID
 
-These are set in `~/.claude/settings.json` under the `env` key.
+These are exported from `~/.zshenv` (see `example.zshenv` in this skill directory for a template).
 
 ## Step 0: Load local context
 
