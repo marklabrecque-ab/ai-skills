@@ -13,6 +13,9 @@ description: >
 
 # Screenshot Skill Generator
 
+Credit: the generated screenshot + compare skills are based on the original
+LEAF skills authored by Dale McGladdery.
+
 Generates two project-specific skills into `<project>/.claude/skills/`:
 
 - `screenshot-<slug>/` — captures full-page screenshots of a curated list of

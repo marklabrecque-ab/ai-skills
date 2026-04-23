@@ -11,7 +11,7 @@ Analyzes a `composer.lock` diff for Drupal projects, fetches release notes from 
 Sets up a functional DDEV environment for Drupal or WordPress projects. Generates `.ddev/providers/*.yaml` files for `ddev pull`, wires `ddev auth ssh` into `post-start`, and for WordPress bootstraps a committed `wp-config-local.php` + `wp-config-override.php` pair so fresh clones boot cleanly. Auto-detects the CMS.
 
 ### [screenshot-skill-init](screenshot-skill-init/)
-Generator skill. Scaffolds a pair of project-specific screenshot + compare skills into the current project's `.claude/skills/` so visual regression testing travels with the repo. Detects WordPress/Drupal/DDEV, discovers primary-nav pages via `wp-cli` or `drush`, and supports authenticated staging targets.
+Generator skill. Scaffolds a pair of project-specific screenshot + compare skills into the current project's `.claude/skills/` so visual regression testing travels with the repo. Detects WordPress/Drupal/DDEV, discovers primary-nav pages via `wp-cli` or `drush`, and supports authenticated staging targets. Generated skill contents credit to Dale McGladdery (original LEAF skills).
 
 ### [timesheet](timesheet/)
 Fills out a Harvest timesheet from daily log files — parses work logs, maps entries to Harvest projects/tasks, and submits hours.
