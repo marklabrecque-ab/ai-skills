@@ -78,6 +78,63 @@ Merge carefully:
 - If `hooks:` doesn't exist, append the block above.
 - If the entry is already present, skip.
 
+## Step 4b — WordPress only: disable `upload_dirs` handling
+
+The WordPress template's `files_import_command` runs on the host and rsyncs into `wp-content/uploads/` on the host filesystem. This only works if DDEV isn't applying its default `upload_dirs` behaviour (which shoves that path into a docker volume that's invisible from the host, breaking `rsync --size-only` across pulls).
+
+In `.ddev/config.yaml`, add or set:
+
+```yaml
+upload_dirs: []
+```
+
+If `upload_dirs` is already present with a non-empty list, replace it with `[]` and ask the user to confirm — they may have set it deliberately for a non-standard uploads path, in which case the template's dest path needs adjusting to match.
+
+## Step 4c — WordPress only: domain swap on `post-import-db`
+
+After `ddev pull <env>`, the imported database still references the production domain everywhere — internal links, image src, Elementor's serialized layout data. Without a search-replace step, the local site loads but every click sends the user back to production. Wire this into `.ddev/config.yaml` as a `post-import-db` hook so it runs automatically after every pull.
+
+Ask the user for:
+
+- The production domain(s) — both `www.` and bare forms if both resolve (e.g. `www.example.ca` and `example.ca`)
+- The local DDEV domain — usually `<project-name>.ddev.site` (read `name:` from `.ddev/config.yaml`)
+- Whether the site uses Elementor (check `wp-content/plugins/elementor*`)
+
+Desired entry (adapt domains; drop the Elementor lines if not applicable):
+
+```yaml
+hooks:
+  post-import-db:
+    # Canonicalize http:// to https:// first so the domain swap below can't
+    # reintroduce mixed content. Two forms: plain (PHP-serialized data) and
+    # JSON-escaped slashes (Elementor stores content as JSON).
+    - exec: wp search-replace 'http://www.{{PROD_DOMAIN}}' 'https://www.{{PROD_DOMAIN}}' --all-tables --skip-columns=guid
+    - exec: wp search-replace 'http://{{PROD_DOMAIN}}' 'https://{{PROD_DOMAIN}}' --all-tables --skip-columns=guid
+    - exec: wp search-replace 'http:\/\/www.{{PROD_DOMAIN}}' 'https:\/\/www.{{PROD_DOMAIN}}' --all-tables --skip-columns=guid
+    - exec: wp search-replace 'http:\/\/{{PROD_DOMAIN}}' 'https:\/\/{{PROD_DOMAIN}}' --all-tables --skip-columns=guid
+    # Domain swap — www first so its matches aren't swallowed by the bare-domain pass.
+    - exec: wp search-replace '://www.{{PROD_DOMAIN}}' '://{{LOCAL_DOMAIN}}' --all-tables --skip-columns=guid
+    - exec: wp search-replace '://{{PROD_DOMAIN}}' '://{{LOCAL_DOMAIN}}' --all-tables --skip-columns=guid
+    - exec: wp search-replace ':\/\/www.{{PROD_DOMAIN}}' ':\/\/{{LOCAL_DOMAIN}}' --all-tables --skip-columns=guid
+    - exec: wp search-replace ':\/\/{{PROD_DOMAIN}}' ':\/\/{{LOCAL_DOMAIN}}' --all-tables --skip-columns=guid
+    # Elementor: only include if the site uses Elementor.
+    - exec: wp elementor replace-urls https://{{PROD_DOMAIN}} https://{{LOCAL_DOMAIN}}
+    - exec: wp elementor replace-urls https://www.{{PROD_DOMAIN}} https://{{LOCAL_DOMAIN}}
+    - exec: wp elementor flush-css
+    - exec: wp cache flush
+```
+
+Why each piece matters:
+
+- **Canonicalize `http://` → `https://` first.** If you swap domains before normalizing the scheme, you'll end up with mixed content — local on `https`, but some old `http://prod.example.ca` rows now point to `http://local.ddev.site`.
+- **Both plain and JSON-escaped-slashes forms.** WordPress's standard search-replace hits PHP-serialized data fine, but Elementor stores layouts as JSON, where `/` is escaped to `\/`. The escaped-slash variants catch those rows.
+- **`www` before bare domain.** `wp search-replace '://example.ca' ...` matches `://www.example.ca` too — if you run the bare-domain pass first, the `www.` prefix gets orphaned. Always do `www` first.
+- **`--skip-columns=guid`.** Canonical WordPress advice: GUIDs are permanent identifiers, never URLs to follow. Rewriting them confuses feed readers.
+- **Elementor `replace-urls` + `flush-css`.** Elementor caches generated CSS files keyed to the original URL; a raw search-replace updates the data but the on-disk CSS still references prod. `flush-css` clears the cache so the next page load regenerates it.
+- **`wp cache flush` last** — clears any object cache populated during the search-replace passes.
+
+Merge with existing `hooks:` block (same rules as Step 4 for `post-start`).
+
 ## Step 5 — WordPress only: bootstrap `wp-config.php`
 
 Skip for Drupal.
@@ -103,6 +160,10 @@ Approach:
 
 If the user has an existing `wp-config.php` they want to keep, leave it alone and just add the `wp-config-override.php` + a `require_once` at the end of their `wp-config.php` (before `wp-settings.php`).
 
+**On template drift:** the `pre-start` hook only seeds `wp-config.php` when the file is *missing*. Once seeded, `wp-config.php` diverges from `wp-config-local.php` over time — plugins like Solid Security / iThemes Security prepend their own config blocks, and users may hand-edit. This is expected, but it means later edits to `wp-config-local.php` do NOT propagate to the live file. If you change the template (e.g. to add a `defined()` guard), also apply the same edit to the user's live `wp-config.php`, or tell them to `rm wp-config.php && ddev start` to regenerate (they'll lose any plugin-injected blocks, which the plugin will re-add on next admin load).
+
+**Why the WP_DEBUG defines are guarded:** DDEV's auto-generated `wp-config-ddev.php` already defines `WP_DEBUG`. A second `define('WP_DEBUG', ...)` in our file produces a PHP warning that fires during wp-config.php parsing — before WordPress has applied `WP_DEBUG_DISPLAY = false` — so the warning text prints into the response body *before* `<!DOCTYPE html>`. That knocks the browser into quirks mode and silently breaks Elementor/theme layout. The `if (!defined(...)) define(...)` guards in the template prevent this. Never "simplify" them away.
+
 ## Step 6 — Tell the user what's next
 
 ```
@@ -116,7 +177,7 @@ ddev pull <environment-name>
 
 - Both templates use `environment_variables` with `ssh_user` and `ssh_host` (lowercase). The `affinity-clone` script parses these case-insensitively but requires exactly one variable containing `HOST` and one containing `USER` — don't add a second (e.g. don't introduce a `remote_user` alongside `ssh_user`).
 - Push commands are stubbed out with an "unsupported" message by default. This is deliberate: accidental `ddev push prod` is a disaster. Only enable pushes for non-production targets, and only if the user explicitly asks.
-- `files_pull_command` uses rsync of the uploads/files directory. For large sites the user may prefer `stage_file_proxy` instead — in that case, replace the `files_pull_command` body with a no-op `echo` (see the islandhealth-style prod examples in the user's project checkouts).
+- Both templates use `files_import_command` (not `files_pull_command`) to rsync the files directory. This is deliberate: defining `files_pull_command` alongside an rsync that writes to the final destination makes DDEV run its default import step afterwards, which rsyncs from the (empty) `.ddev/.downloads/files/` staging dir into the project uploads/files dir with delete semantics — wiping everything just pulled. Omitting `files_pull_command` skips that default. For large sites the user may prefer `stage_file_proxy` instead — in that case, replace the `files_import_command` body with a no-op `echo` (see the islandhealth-style prod examples in the user's project checkouts).
 
 ## Tip: per-project key auto-loading (optional)
 
