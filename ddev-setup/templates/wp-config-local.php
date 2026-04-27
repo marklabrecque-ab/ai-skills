@@ -12,33 +12,35 @@
  */
 
 // DDEV-managed database credentials, URLs, etc.
-if (file_exists(__DIR__ . '/wp-config-ddev.php')) {
-  require_once __DIR__ . '/wp-config-ddev.php';
+if (file_exists(__DIR__ . "/wp-config-ddev.php")) {
+    require_once __DIR__ . "/wp-config-ddev.php";
 }
 
-$table_prefix = 'wp_';
+$table_prefix = "wp_";
 
-define('WP_DEBUG', true);
-define('WP_DEBUG_LOG', true);
-define('WP_DEBUG_DISPLAY', false);
+// DDEV's wp-config-ddev.php already defines WP_DEBUG. Guard to avoid a
+// duplicate-define warning that prints before <!DOCTYPE> and breaks layout.
+if (!defined("WP_DEBUG")) define("WP_DEBUG", true);
+if (!defined("WP_DEBUG_LOG")) define("WP_DEBUG_LOG", true);
+if (!defined("WP_DEBUG_DISPLAY")) define("WP_DEBUG_DISPLAY", false);
 
 // Replace with real values from https://api.wordpress.org/secret-key/1.1/salt/
-define('AUTH_KEY',         'put your unique phrase here');
-define('SECURE_AUTH_KEY',  'put your unique phrase here');
-define('LOGGED_IN_KEY',    'put your unique phrase here');
-define('NONCE_KEY',        'put your unique phrase here');
-define('AUTH_SALT',        'put your unique phrase here');
-define('SECURE_AUTH_SALT', 'put your unique phrase here');
-define('LOGGED_IN_SALT',   'put your unique phrase here');
-define('NONCE_SALT',       'put your unique phrase here');
+define("AUTH_KEY", "put your unique phrase here");
+define("SECURE_AUTH_KEY", "put your unique phrase here");
+define("LOGGED_IN_KEY", "put your unique phrase here");
+define("NONCE_KEY", "put your unique phrase here");
+define("AUTH_SALT", "put your unique phrase here");
+define("SECURE_AUTH_SALT", "put your unique phrase here");
+define("LOGGED_IN_SALT", "put your unique phrase here");
+define("NONCE_SALT", "put your unique phrase here");
 
-if (!defined('ABSPATH')) {
-  define('ABSPATH', __DIR__ . '/');
+if (!defined("ABSPATH")) {
+    define("ABSPATH", __DIR__ . "/");
 }
 
 // Per-project overrides — loaded last so they win over everything above.
-if (file_exists(__DIR__ . '/wp-config-override.php')) {
-  require_once __DIR__ . '/wp-config-override.php';
+if (file_exists(__DIR__ . "/wp-config-override.php")) {
+    require_once __DIR__ . "/wp-config-override.php";
 }
 
-require_once ABSPATH . 'wp-settings.php';
+require_once ABSPATH . "wp-settings.php";
