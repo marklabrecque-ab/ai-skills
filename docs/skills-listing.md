@@ -1,0 +1,7 @@
+| Skill | Description |
+|-------|-------------|
+| [drupal-upgrade-assessment](drupal-upgrade-assessment/) | Performs a Drupal major version upgrade assessment — analyzes contrib modules, custom code, patches, front end, and infrastructure, then generates a human-readable report and an agent-executable workplan. |
+| [composer-changelog](https://git.affinitybridge.com/mark/ai-skills/-/tree/main/composer-changelog) | Analyzes a `composer.lock` diff for Drupal projects, fetches release notes from Drupal.org for changed production dependencies, and produces a Markdown report highlighting breaking changes, deprecations, and security fixes. |
+| [ddev-setup](https://git.affinitybridge.com/mark/ai-skills/-/tree/main/ddev-setup) | Sets up a functional DDEV environment for Drupal or WordPress projects — generates `.ddev/providers/*.yaml` for `ddev pull`, wires `ddev auth ssh` into `post-start`, and for WordPress bootstraps a committed `wp-config-local.php` + `wp-config-override.php` pair. |
+| [screenshot-skill-init](https://git.affinitybridge.com/mark/ai-skills/-/tree/main/screenshot-skill-init) | Generator skill. Scaffolds a pair of project-specific screenshot + compare skills into the current project's `.claude/skills/` so visual regression testing travels with the repo. Detects WordPress/Drupal/DDEV and discovers primary-nav pages. |
+| [timesheet](https://git.affinitybridge.com/mark/ai-skills/-/tree/main/timesheet) | Fills out a Harvest timesheet from daily log files — parses work logs, maps entries to Harvest projects/tasks, and submits hours. |
