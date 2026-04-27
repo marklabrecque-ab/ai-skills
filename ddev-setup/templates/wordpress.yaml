@@ -33,14 +33,29 @@ db_pull_command:
     ssh -p${ssh_port} ${ssh_user}@${ssh_host} "rm -f ${backup_path}/db.sql.gz"
   service: web
 
-files_pull_command:
+# Uses files_import_command (not files_pull_command) so the rsync writes
+# directly to the final destination on the host. files_pull_command is
+# intentionally omitted — if it were present, DDEV's default import step
+# would rsync from an empty .ddev/.downloads/files/ into wp-content/uploads/
+# with delete semantics and wipe everything we just pulled.
+#
+# Runs on the host (not the web container) so rsync writes directly to the
+# host filesystem. This is required for --size-only to be effective across
+# pulls: DDEV's default `upload_dirs` handling puts wp-content/uploads in a
+# docker-volume mount that isn't comparable from the host, so rsync can't
+# tell what's already there. Writing to the host path sidesteps that.
+#
+# Prerequisite: set `upload_dirs: []` in .ddev/config.yaml to disable the
+# special volume handling; mutagen will sync uploads normally.
+#
+# --size-only: rsync's default size+mtime check re-transfers files every
+# pull because mutagen doesn't preserve mtimes faithfully. Uploads are
+# immutable (same name = same content), so size comparison is safe.
+files_import_command:
   command: |
     set -eu -o pipefail
-    # --size-only: rsync's default size+mtime check re-transfers files every pull
-    # because mutagen/container mounts don't preserve mtimes faithfully. Uploads
-    # are immutable (same name = same content), so size comparison is safe.
-    rsync -avz --size-only -e "ssh -p${ssh_port}" ${ssh_user}@${ssh_host}:${remote_path}/wp-content/uploads/ /var/www/html/wp-content/uploads/
-  service: web
+    rsync -avz --size-only -e "ssh -p${ssh_port}" ${ssh_user}@${ssh_host}:${remote_path}/wp-content/uploads/ wp-content/uploads/
+  service: host
 
 # Pushing a database or files to a remote environment is dangerous and not
 # enabled by default. Uncomment and adapt only for non-production targets.
