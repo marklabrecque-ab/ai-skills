@@ -40,7 +40,7 @@ Ask the user for what you don't already know. Reasonable things to offer default
 | Environment name (file name) | `prod`, `stage`, `dev`, `cert` — ask which |
 | SSH user | — (always ask) |
 | SSH host | — (always ask; may be an IP, FQDN, or an `~/.ssh/config` alias) |
-| SSH port | `22` |
+| SSH port | `22222` |
 | Remote path | — (always ask; the composer/project root on the server) |
 | Backup path | Same as Remote path — don't prompt. The dump is written there, rsynced, then removed. |
 
@@ -143,7 +143,10 @@ Goal: on a fresh clone, `ddev start` should produce a working `wp-config.php` au
 
 Approach:
 
-1. Copy `templates/wp-config-local.php` → `<wp-root>/wp-config-local.php` (committed).
+1. Copy `templates/wp-config-local.php` → `<wp-root>/wp-config-local.php` (committed). Before writing the file, fetch a fresh set of salts and substitute them for the `{{SALTS}}` placeholder:
+   - `curl -fsS https://api.wordpress.org/secret-key/1.1/salt/` returns 8 ready-to-paste `define(...)` lines.
+   - Replace `{{SALTS}}` in the template body with the response verbatim, then write the file.
+   - If the curl fails (no network), fall back to writing the placeholder block of 8 `define(... "put your unique phrase here")` lines and tell the user to grab fresh salts from the URL and paste them in. Do NOT commit "put your unique phrase here" silently.
 2. Copy `templates/wp-config-override.php` → `<wp-root>/wp-config-override.php` (committed). Edit it to set whatever the user actually needs overridden (ask — the common one is `$table_prefix`).
 3. Ensure `wp-config.php` is gitignored if it isn't already (it's the generated/local file).
 4. Add a `pre-start` hook to `.ddev/config.yaml` so the local template is copied into place when `wp-config.php` is absent:
