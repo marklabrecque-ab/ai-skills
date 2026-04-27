@@ -24,15 +24,9 @@ if (!defined("WP_DEBUG")) define("WP_DEBUG", true);
 if (!defined("WP_DEBUG_LOG")) define("WP_DEBUG_LOG", true);
 if (!defined("WP_DEBUG_DISPLAY")) define("WP_DEBUG_DISPLAY", false);
 
-// Replace with real values from https://api.wordpress.org/secret-key/1.1/salt/
-define("AUTH_KEY", "put your unique phrase here");
-define("SECURE_AUTH_KEY", "put your unique phrase here");
-define("LOGGED_IN_KEY", "put your unique phrase here");
-define("NONCE_KEY", "put your unique phrase here");
-define("AUTH_SALT", "put your unique phrase here");
-define("SECURE_AUTH_SALT", "put your unique phrase here");
-define("LOGGED_IN_SALT", "put your unique phrase here");
-define("NONCE_SALT", "put your unique phrase here");
+// Salts — fetched fresh from https://api.wordpress.org/secret-key/1.1/salt/
+// at file generation time by the ddev-setup skill.
+{{SALTS}}
 
 if (!defined("ABSPATH")) {
     define("ABSPATH", __DIR__ . "/");
