@@ -18,23 +18,29 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-# Find the menu assigned to the given theme location
-MENU_SLUG=$(ddev wp menu location list --format=json 2>/dev/null \
-  | jq -r --arg loc "$LOCATION" '.[] | select(.location==$loc) | .menu')
+# Find the menu assigned to the given theme location.
+# `wp menu location list` only enumerates registered locations (no assignment
+# info), so query `wp menu list` and filter on the `locations` array instead.
+MENU_SLUG=$(ddev wp menu list --format=json 2>/dev/null \
+  | jq -r --arg loc "$LOCATION" '.[] | select(.locations | index($loc)) | .slug' \
+  | head -n1)
 
 if [ -z "${MENU_SLUG:-}" ] || [ "$MENU_SLUG" = "null" ]; then
   echo "ERROR: no menu assigned to location '$LOCATION'" >&2
   echo "Available locations:" >&2
   ddev wp menu location list >&2 || true
+  echo "Available menus and their locations:" >&2
+  ddev wp menu list --fields=slug,name,locations 2>/dev/null >&2 || true
   exit 1
 fi
 
-# Export menu items and convert URLs to paths, skipping separators/customs with no URL
+# Export menu items and convert links to paths, skipping separators/customs
+# with no link. wp-cli emits the URL as `.link` (not `.url`).
 ddev wp menu item list "$MENU_SLUG" --format=json 2>/dev/null \
   | jq -r '
     [ .[]
-      | select(.url != null and .url != "#")
-      | { title: .title, url: .url }
+      | select(.link != null and .link != "" and .link != "#")
+      | { title: .title, link: .link }
     ]
   ' \
   | python3 -c '
@@ -46,7 +52,7 @@ seen = set()
 out = []
 i = 0
 for item in items:
-  path = urlparse(item["url"]).path or "/"
+  path = urlparse(item["link"]).path or "/"
   if path in seen:
     continue
   seen.add(path)
