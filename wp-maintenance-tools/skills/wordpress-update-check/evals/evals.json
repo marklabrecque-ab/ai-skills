@@ -1,0 +1,23 @@
+{
+  "skill_name": "wordpress-update-check",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "/wordpress-update-check",
+      "expected_output": "A docs/wordpress-update-check-YYYY-MM-DD.md report covering every pending plugin update on this WP site, with per-plugin risk ratings (low/medium/high) inferred from actual code diffs, plus a terminal summary table and two suggested wp-cli update commands. Gravity Forms (premium, S3-signed URL) should appear as skipped.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "/wordpress-update-check wordpress-seo",
+      "expected_output": "A report containing only the wordpress-seo plugin section (no other pending updates analyzed), with a risk rating, diff highlights, cross-reference grep of the child theme for any removed Yoast hooks/filters, and a suggested wp-cli command targeting just wordpress-seo.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Can you look at the pending plugin updates and tell me which ones are safe to apply tonight versus which need careful review?",
+      "expected_output": "The skill triggers without the slash command (description-driven), produces the full report, and the conversational reply summarizes which plugins are low/medium risk (likely safe) vs high/skipped (needs review), referring back to the written report.",
+      "files": []
+    }
+  ]
+}

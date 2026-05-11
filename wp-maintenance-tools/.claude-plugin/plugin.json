@@ -1,0 +1,9 @@
+{
+  "name": "wp-maintenance-tools",
+  "version": "0.1.0",
+  "description": "Maintenance skills for WordPress projects running on DDEV. Currently bundles wordpress-update-check: a per-plugin risk report based on actual code diffs between installed and incoming versions.",
+  "author": {
+    "name": "Mark Labrecque",
+    "email": "mark@affinitybridge.com"
+  }
+}
