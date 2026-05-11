@@ -1,0 +1,9 @@
+{
+  "name": "timesheet",
+  "version": "0.1.0",
+  "description": "Fill out Harvest timesheets from daily log markdown files. Includes a post-commit hook that appends each git commit to today's daily report.",
+  "author": {
+    "name": "Mark Labrecque",
+    "email": "mark@affinitybridge.com"
+  }
+}
