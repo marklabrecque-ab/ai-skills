@@ -6,7 +6,7 @@ A Claude Code [plugin marketplace](https://code.claude.com/docs/en/plugin-market
 
 ```bash
 # In Claude Code
-/plugin marketplace add <git-url-or-local-path>
+/plugin marketplace add https://git.affinitybridge.com/mark/ai-skills.git
 /plugin install <plugin-name>@test-marketplace
 ```
 
