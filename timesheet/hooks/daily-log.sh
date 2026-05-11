@@ -28,9 +28,16 @@ if grep -qF "$commit_sha" "$report_file" 2>/dev/null; then
   exit 0
 fi
 
-# Append entry
-cat >> "$report_file" <<ENTRY
+# Extract ticket references (#NNN) from the commit subject so the timesheet
+# skill's parser hits the authoritative `**Tickets:**` path instead of falling
+# back to a regex scan. Multiple tickets are joined with ", " in source order.
+tickets=$(printf '%s\n' "$commit_msg" | { grep -oE '#[0-9]+' || true; } | awk '!seen[$0]++' | paste -sd, - | sed 's/,/, /g')
 
-### ${timestamp} — ${repo_name}
-${commit_msg} (${commit_sha})
-ENTRY
+# Append entry
+{
+  printf '\n### %s — %s\n' "$timestamp" "$repo_name"
+  if [ -n "$tickets" ]; then
+    printf '**Tickets:** %s\n' "$tickets"
+  fi
+  printf '%s (%s)\n' "$commit_msg" "$commit_sha"
+} >> "$report_file"
