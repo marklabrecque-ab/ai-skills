@@ -1,0 +1,9 @@
+{
+  "name": "screenshot-skill-init",
+  "version": "0.1.0",
+  "description": "Generator: scaffolds a pair of project-specific screenshot + compare skills into a target repo's .claude/skills/ directory for visual regression workflows.",
+  "author": {
+    "name": "Mark Labrecque",
+    "email": "mark@affinitybridge.com"
+  }
+}

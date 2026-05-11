@@ -1,0 +1,34 @@
+{
+  "name": "test-marketplace",
+  "owner": {
+    "name": "Mark Labrecque",
+    "email": "mark@affinitybridge.com"
+  },
+  "plugins": [
+    {
+      "name": "composer-changelog",
+      "source": "./composer-changelog",
+      "description": "Analyze composer.lock diffs for Drupal projects and produce a Markdown changelog report."
+    },
+    {
+      "name": "ddev-setup",
+      "source": "./ddev-setup",
+      "description": "Set up a functional DDEV environment for Drupal or WordPress projects."
+    },
+    {
+      "name": "screenshot-skill-init",
+      "source": "./screenshot-skill-init",
+      "description": "Scaffold project-specific screenshot + compare skills for visual regression."
+    },
+    {
+      "name": "timesheet",
+      "source": "./timesheet",
+      "description": "Fill out Harvest timesheets from daily log files; includes a post-commit hook that records commits to a daily report."
+    },
+    {
+      "name": "value-estimates",
+      "source": "./value-estimates",
+      "description": "Generate value-based estimate reports comparing GitLab ticket estimates to Harvest actuals."
+    }
+  ]
+}
