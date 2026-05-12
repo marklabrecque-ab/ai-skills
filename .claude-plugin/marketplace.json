@@ -34,6 +34,11 @@
       "name": "wp-maintenance-tools",
       "source": "./wp-maintenance-tools",
       "description": "Maintenance skills for WordPress projects on DDEV. Bundles wordpress-update-check: a per-plugin risk report based on actual code diffs between installed and incoming versions."
+    },
+    {
+      "name": "youtube-playlist-builder",
+      "source": "./youtube-playlist-builder",
+      "description": "Build YouTube music playlists from a mood/likes/dislikes descriptor. Claude curates the tracklist, searches each track on YouTube, and assembles the playlist."
     }
   ]
 }
