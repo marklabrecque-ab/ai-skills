@@ -9,13 +9,20 @@ Assemble a YouTube music playlist from a free-form descriptor that may include m
 
 ## Required tools
 
-This skill relies on the `youtube` MCP server. The user must have these tools available:
+This skill relies on the `youtube-playlist-url` MCP server (a minimal read-only server bundled with this plugin at `mcp-server/index.js`). The user must have these tools available:
 
-- `mcp__youtube__search_videos`
-- `mcp__youtube__create_playlist`
-- `mcp__youtube__add_to_playlist`
+- `mcp__youtube-playlist-url__search_video`
+- `mcp__youtube-playlist-url__build_playlist_url`
 
-If any are missing, stop and tell the user to install/authenticate the youtube MCP before retrying.
+If they're missing, the MCP probably failed to start because `yt-dlp` is not installed. Tell the user to run the setup script:
+
+```bash
+bash <plugin-dir>/mcp-server/setup.sh
+```
+
+The script checks for Homebrew, installs `yt-dlp` if missing, and runs `npm install`. Then they restart Claude Code.
+
+This skill does **not** create the playlist via the YouTube write API (which would require OAuth and a verified app for the restricted `youtube` scope). Instead, the MCP uses `yt-dlp` to resolve track names to video IDs (no API key, no quota), and the user installs a one-time bookmarklet that adds the videos to a playlist using their existing logged-in YouTube session via the same internal Innertube API the **Save** button uses.
 
 ## Inputs
 
@@ -52,36 +59,45 @@ Guidelines:
 
 Present the proposed tracklist to the user as a numbered list of `Artist — Title` and ask for confirmation (or edits) **before** searching YouTube. This avoids wasted API calls if the curation is off.
 
-## Step 3 — Resolve each track on YouTube
+## Step 3 — Resolve tracks to video IDs
 
-After the user confirms, for each track:
+After the user confirms the tracklist, call `mcp__youtube-playlist-url__build_playlist_url` **once** with the full ordered list of track query strings (e.g. `"Chemical Brothers Galvanize"`). The MCP resolves each track to the top YouTube search result and returns:
 
-1. Call `mcp__youtube__search_videos` with a query like `"<Artist> <Title>"`. Ask for ~3 results so you can pick the best.
-2. Choose the best match using this priority:
-   - Official artist channel / "VEVO" upload
-   - Official audio / "Topic" channel auto-uploads (these are official)
-   - Highest-view canonical upload from a reputable source
-   - Avoid: covers, karaoke, slowed/reverb edits, fan-made lyric videos, "8D audio" remixes — unless the descriptor specifically asked for that style
-3. Record the video ID. If no acceptable match exists, note it as **unresolved** and continue; do not substitute a random track silently.
+```json
+{
+  "url": "https://www.youtube.com/watch_videos?video_ids=...",
+  "resolved": [{ "track": "...", "videoId": "...", "title": "...", "channel": "..." }],
+  "unresolved": [{ "track": "...", "videoId": null }]
+}
+```
 
-Run searches in parallel where possible (multiple tool calls in one assistant turn) to keep things fast.
+The `url` field is included by the MCP but **ignored by this skill** — the `watch_videos` endpoint is unreliable (YouTube progressively broke it; it often redirects to a single video). The skill uses the `resolved[].videoId` list instead, paired with a bookmarklet on the user's side.
 
-## Step 4 — Create the playlist and add tracks
+Use `mcp__youtube-playlist-url__search_video` per track if a top match looks suspect (cover, karaoke, slowed/reverb, lyric-only video) and refine the query.
 
-1. Call `mcp__youtube__create_playlist` with:
-   - A descriptive title derived from the descriptor (e.g. "Late-night synthwave — moody coding mix")
-   - A short description that summarizes the mood and notes it was Claude-curated
-   - Default to **private** privacy unless the user explicitly asked for public/unlisted
-2. For each resolved video, call `mcp__youtube__add_to_playlist` with the playlist ID and video ID, preserving the curated order.
+Also watch for **duplicate `videoId`s in `resolved`** — that means two different track queries collapsed to the same YouTube video (e.g. a generic title matching a more popular release). Re-search the offending track with a more specific query.
 
-## Step 5 — Report back
+## Step 4 — Hand off to the bookmarklet
 
-Give the user:
+The user installs the bundled bookmarklet (`bookmarklet/add-to-playlist.bookmarklet.txt`) once. It adds a batch of videos to one of their YouTube playlists using their existing signed-in session, via YouTube's internal Innertube API. No OAuth, no API key for the write step.
 
-- The playlist URL (or title + ID if URL isn't returned by the MCP)
-- Total tracks added vs. requested
-- A list of any **unresolved** tracks with a one-line reason each
-- An offer to find replacements for the unresolved ones, or to swap any tracks the user wants changed
+Push the comma-separated video IDs to the user's clipboard with `pbcopy` so terminal wrap artifacts can't corrupt them:
+
+```bash
+printf '%s' 'Xu3FTEmN-eg,ub747pprmJ8,...' | pbcopy
+```
+
+Then tell the user:
+
+1. **"IDs are on your clipboard."** (Do not also paste the long ID string into the chat — that re-introduces the wrap-and-copy problem the clipboard hand-off was meant to solve. If you want to show them, list 2–3 IDs as a sanity check, not all 30.)
+2. **A reminder of the per-playlist steps** (compressed if the user has done this before):
+   - Open YouTube Studio → **Content → Playlists → New playlist** → name → Create. Open it and copy the `PL...` part from the URL (or just the whole URL — the bookmarklet parses both).
+   - On any youtube.com tab, click the **YT: Add to Playlist** bookmarklet.
+   - Paste the playlist ID/URL at the first prompt. The bookmarklet reads the video IDs directly from the clipboard, shows a confirm dialog with the count + preview, and adds them.
+3. **Total tracks resolved vs. requested**, and any **unresolved** tracks with a one-line reason each.
+4. **An offer to swap any tracks** the user wants changed (which would re-run `pbcopy` with a new list).
+
+If the user has not yet installed the bookmarklet, link them to `bookmarklet/README.md` and walk them through it.
 
 ## Notes on judgment
 
