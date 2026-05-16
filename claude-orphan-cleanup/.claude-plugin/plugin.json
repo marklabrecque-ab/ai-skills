@@ -1,0 +1,9 @@
+{
+  "name": "claude-orphan-cleanup",
+  "version": "0.1.0",
+  "description": "Find and remove orphaned project-scoped data folders under ~/.claude/projects/ whose original source directory no longer exists.",
+  "author": {
+    "name": "Mark Labrecque",
+    "email": "mark@affinitybridge.com"
+  }
+}

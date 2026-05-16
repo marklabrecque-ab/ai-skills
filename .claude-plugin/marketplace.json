@@ -6,6 +6,11 @@
   },
   "plugins": [
     {
+      "name": "claude-orphan-cleanup",
+      "source": "./claude-orphan-cleanup",
+      "description": "Find and remove orphaned project-scoped Claude data folders under ~/.claude/projects/ whose source directory no longer exists."
+    },
+    {
       "name": "composer-changelog",
       "source": "./composer-changelog",
       "description": "Analyze composer.lock diffs for Drupal projects and produce a Markdown changelog report."
