@@ -6,9 +6,9 @@
   },
   "plugins": [
     {
-      "name": "claude-orphan-cleanup",
-      "source": "./claude-orphan-cleanup",
-      "description": "Find and remove orphaned project-scoped Claude data folders under ~/.claude/projects/ whose source directory no longer exists."
+      "name": "claude-context-management",
+      "source": "./claude-context-management",
+      "description": "Skills for managing Claude Code's local context (orphan-data cleanup, etc.)."
     },
     {
       "name": "composer-changelog",
