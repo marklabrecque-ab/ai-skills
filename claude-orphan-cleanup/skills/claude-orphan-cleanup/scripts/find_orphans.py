@@ -32,18 +32,27 @@ WORKTREE_MARKER = "/.claude/worktrees/"
 
 
 def first_session_cwd(project_dir: Path) -> str | None:
-    """Return the cwd recorded in the first JSONL session file, or None."""
+    """Return the cwd recorded in any JSONL line, scanning files until found.
+
+    JSONL files start with metadata records (last-prompt, permission-mode,
+    bridge_status) that don't carry a cwd; the cwd appears once a real
+    user/assistant message is logged. Scan every line, and try every file
+    in the project dir before giving up.
+    """
     for jsonl in sorted(project_dir.glob("*.jsonl")):
         try:
             with jsonl.open() as f:
-                line = f.readline()
-            if not line.strip():
-                continue
-            data = json.loads(line)
-            cwd = data.get("cwd")
-            if cwd:
-                return cwd
-        except (json.JSONDecodeError, OSError):
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    cwd = data.get("cwd")
+                    if cwd:
+                        return cwd
+        except OSError:
             continue
     return None
 
