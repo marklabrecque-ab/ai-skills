@@ -84,13 +84,42 @@ Offer the user these discovery methods via AskUserQuestion:
 - **Drupal + DDEV** → run `scripts/discover_drupal.sh`
 - **Manual paste** → show a template and let the user paste `name,path` lines
 
-Each method produces a list of `{name, path}` objects. Names follow the
-`NN-slug` convention (e.g. `00-home`, `01-about`) so the sorted file order
-matches the intended reading order.
+Each method produces a list of `{name, path, source}` objects. Names follow
+the `NN-slug` convention (e.g. `00-home`, `01-about`) so the sorted file
+order matches the intended reading order.
 
-After discovery, show the list to the user and let them prune/reorder before
-writing. This human-in-the-loop step is critical — menus usually contain
-cruft.
+#### Drupal discovery sources
+
+`discover_drupal.sh` pulls from three sources by default — all included
+unless explicitly opted out:
+
+1. **Menu tree** (recursive) — walks the full subtree, not just top-level
+   items. Defaults to the `main` menu; override with `--menu <name>`. Skips
+   `<nolink>` / `<button>` placeholders.
+2. **System pages** — `/user/login`, a deliberate 404 path, plus `/search`
+   (if the `search` module is enabled) and `/sitemap.xml` (if
+   `simple_sitemap` or `xmlsitemap` is enabled). Disable with
+   `--no-system-pages`. Very low flake risk — these are routes, not content.
+3. **Oldest published node per content type** — picks the lowest-`created`
+   published node per bundle, gives one example URL per content type. Uses
+   *oldest* (not newest) because anchor content tends to be permanent;
+   recent content churns. Skips bundles without a canonical link template
+   (e.g. `webform`). Disable with `--no-content-types`.
+
+Before running, **ask the user** whether to include the content-type pass
+(default: yes). It produces the richest coverage but is the only source
+with non-zero flake risk — if a sampled node gets unpublished or deleted,
+that page disappears from the screenshot set on the next run. The human
+prune step below catches most of this, but flag the tradeoff.
+
+#### Pruning is mandatory
+
+After discovery, show the list to the user — grouped by `source` so they
+can see what came from where — and let them prune/reorder before writing.
+This human-in-the-loop step is critical. Menus contain cruft; content-type
+samples occasionally land on a test node or an unpublished draft (the
+status filter catches most but not all edge cases); system pages may be
+redundant on some sites.
 
 ### Step 5 — Render templates
 
@@ -110,6 +139,25 @@ The renderer:
 - Writes `compare-<slug>-screenshots/SKILL.md`, `compare-<slug>-screenshots/scripts/compare.py`
 - Substitutes `{{SLUG}}`, `{{PROJECT_NAME}}`, `{{TARGETS_JSON}}` inline
 - Copies `pages.json` verbatim (single source of truth)
+
+### Step 5b — Ensure `scratch/` is gitignored
+
+The generated screenshot script writes runs to `scratch/screenshots/<target>-<YYYY-MM-DD>-<HHmm>/` at the project root. Screenshot output should never be committed (large, generated, churn-heavy, often contains staging-only data).
+
+Check the project's `.gitignore`:
+
+```bash
+git check-ignore -v scratch/ 2>/dev/null && echo "ignored" || echo "NOT ignored"
+```
+
+If `scratch/` is not already covered, append it to the top-level `.gitignore`. Idempotent edit — only add if missing:
+
+```
+# Screenshot runs from .claude/skills/screenshot-*/ — generated output, never commit.
+scratch/
+```
+
+If the project has no `.gitignore`, create one with just that block. Don't add other unrelated ignores from a template — leave that to the project's own conventions.
 
 ### Step 6 — Verify
 
