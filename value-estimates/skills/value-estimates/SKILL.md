@@ -7,7 +7,7 @@ description: "Generate a value-based estimate report for a project — pulls tic
 
 Produce a report that, for a given Harvest project and time window, lists every ticket touched, the **estimated** effort (derived from the GitLab spec or an explicit estimate on the ticket), and the **actual** hours logged in Harvest. The report also surfaces tickets that lack a usable spec so the user knows where definition is missing.
 
-The report is printed to the conversation by default. After printing, ask the user whether to also save it as a Markdown file under `docs/` of the current working directory.
+The report is printed to the conversation by default. After printing, ask the user whether to also save it as a Markdown file under `docs/value-estimates/` of the current working directory. This subfolder is expected to be gitignored — value-estimate reports may include client-sensitive hours/ticket data and should not be committed by default.
 
 ## Arguments
 
@@ -17,7 +17,7 @@ The skill accepts the following arguments (free-form — extract from the user's
 - **`--from YYYY-MM-DD` / `--to YYYY-MM-DD`** *(optional)* — explicit date range.
 - **`--days N`** *(optional)* — alternative to `--from/--to`; covers the last N days ending yesterday.
 - **`--labels label1,label2`** *(optional)* — only include tickets whose GitLab labels match **any** of the supplied labels (case-insensitive).
-- **`--save`** *(optional)* — skip the post-report prompt and write to `docs/` immediately.
+- **`--save`** *(optional)* — skip the post-report prompt and write to `docs/value-estimates/` immediately.
 
 If neither `--from/--to` nor `--days` is supplied, **always ask the user for a time frame**, suggesting "last 30 days" as the default.
 
@@ -196,7 +196,9 @@ For ranged estimates, **always use the high end of the range** as the estimate v
 
 ## Step 8: Offer to save
 
-After printing, ask: *"Save this report to `docs/<project-slug>-value-estimate-<from>_<to>.md`?"* — unless `--save` was passed, in which case write it directly. Create `docs/` if missing.
+After printing, ask: *"Save this report to `docs/value-estimates/<project-slug>-value-estimate-<from>_<to>.md`?"* — unless `--save` was passed, in which case write it directly. Create `docs/value-estimates/` if missing.
+
+The `docs/value-estimates/` folder should be gitignored (these reports often contain client-sensitive hours and ticket detail). If the current repo's `.gitignore` does not already list `docs/value-estimates/`, add the line on first save and mention to the user that you did.
 
 ## Failure modes (fail loud, exit clean)
 
