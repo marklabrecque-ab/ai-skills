@@ -178,9 +178,21 @@ Ask the user for the canonical production URL for `stage_file_proxy` — the sch
 
 If the user is unsure or the site doesn't have a public production URL yet, set it to an empty string and tell them to fill it in later (the `stage_file_proxy` module will simply do nothing until the origin is populated). Don't block setup on this.
 
-### Step 4d.3 — Uncomment the include block in `settings.php`
+### Step 4d.3 — Edit `settings.php`: empty-origin default + include block
 
-Drupal's default `settings.php` contains this block at the bottom, commented out:
+Two edits to the committed `settings.php`, both at the bottom of the file:
+
+**1. Add the empty-origin default for `stage_file_proxy`.** This is the production safety mechanism. Add it *above* the include block so that `settings.local.php` (which only exists on developer machines) can override it.
+
+```php
+// stage_file_proxy: globally inert by default. The settings.local.php file
+// below (gitignored, dev-only) overrides this on local with the real origin.
+// On prod, no settings.local.php exists, so the empty string wins and the
+// module's subscriber bails on every request without side effects.
+$config['stage_file_proxy.settings']['origin'] = '';
+```
+
+**2. Uncomment the existing `settings.local.php` include block.** Drupal's default `settings.php` contains this block, commented out:
 
 ```php
 # if (file_exists($app_root . '/' . $site_path . '/settings.local.php')) {
@@ -188,7 +200,9 @@ Drupal's default `settings.php` contains this block at the bottom, commented out
 # }
 ```
 
-Uncomment it (remove the leading `# ` from those three lines). If the block is missing entirely (some older or hand-tuned `settings.php` files lack it), append the uncommented form at the end of the file.
+Uncomment it (remove the leading `# ` from those three lines). If the block is missing entirely (some older or hand-tuned `settings.php` files lack it), append the uncommented form after the `$config[...]['origin']` line above.
+
+Order matters: the `$config[]` default must come *before* the include, so `settings.local.php` can override it.
 
 ### Step 4d.4 — Commit the seed file
 
@@ -239,6 +253,43 @@ ddev drush cex -y   # export the enabled state to config
 ```
 
 If the project doesn't want `stage_file_proxy` (e.g. files are synced via `ddev pull`), they can comment out or remove the `$config['stage_file_proxy.settings']['origin']` line from `default.settings.local.php` before committing.
+
+### Step 4d.8 — How prod stays safe (explain to the user)
+
+The user will reasonably ask "wait, you're shipping `stage_file_proxy` to prod — what stops it from running there?" Walk them through the guarantees so they understand the design:
+
+**What deploys to prod:**
+
+| Deployed | Functional? | Notes |
+|---|---|---|
+| Module code (composer) | inert | bails on empty origin |
+| Module enabled state (`core.extension.yml`) | inert | enabled but does nothing |
+| `$config[...]['origin'] = ''` line in `settings.php` | yes — this is the safety | overrides any DB value |
+| `default.settings.local.php` seed (contains prod URL as a literal) | inert | never `include`d on prod; PHP doesn't auto-discover sibling files |
+
+**What does NOT deploy to prod:**
+
+- `settings.local.php` — gitignored, only exists on dev machines after `ddev start` runs the post-start copy
+- A working `origin` value in the active config / database — module's install default is empty, and nothing overwrites it server-side
+- Any outbound HTTP from the module — the subscriber returns before any fetch logic runs
+
+**Verified runtime behavior on prod** (from `stage_file_proxy` 4.0.x source, `src/EventSubscriber/StageFileProxySubscriber.php::checkFileOrigin`):
+
+```php
+$config = $this->configFactory->get('stage_file_proxy.settings');
+$server = $config->get('origin');
+
+// Quit if no origin given.
+if (!$server) {
+  return;
+}
+```
+
+That early return is the first thing in the subscriber. Empty origin → silent return → no log entry, no exception, no response modification. There's also a second bailout a few lines down: if origin somehow gets set to prod's own hostname, the subscriber returns to prevent self-referential fetches.
+
+**Bottom line:** the module runs on every request on prod (it's a `KernelEvents::REQUEST` listener at priority 240) but the runtime cost is ~2 lines of PHP and zero side effects. Production behavior is indistinguishable from "module not installed" except for the negligible subscriber dispatch overhead.
+
+If the user needs zero-trace on prod (no module code, no enabled state in `core.extension.yml`), they need `config_split` — out of scope for this skill, but mention it as the next step if they ask.
 
 ## Step 5 — WordPress only: bootstrap `wp-config.php`
 
