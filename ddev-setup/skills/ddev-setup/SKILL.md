@@ -1,6 +1,6 @@
 ---
 name: ddev-setup
-description: Sets up a functional DDEV environment for a Drupal or WordPress project. Creates DDEV provider YAML files (.ddev/providers/*.yaml) for `ddev pull`, wires `ddev auth ssh` into post-start, and for WordPress projects bootstraps a committed `wp-config-local.php` + `wp-config-override.php` pair so fresh clones boot cleanly and `$table_prefix` (or similar) can be overridden last-in-cascade. Use when the user wants to set up `ddev pull`, add a new environment (prod/stage/dev/cert) to a DDEV project, configure database and files sync from a remote server, fix a missing or broken provider, bootstrap a WordPress wp-config for a fresh clone, or mentions needing a "DDEV provider" or "DDEV setup". The skill detects the project's CMS (Drupal vs WordPress) from the codebase and selects the correct templates.
+description: Sets up a functional DDEV environment for a Drupal or WordPress project. Creates DDEV provider YAML files (.ddev/providers/*.yaml) for `ddev pull`, wires `ddev auth ssh` into post-start, for WordPress projects bootstraps a committed `wp-config-local.php` + `wp-config-override.php` pair so fresh clones boot cleanly and `$table_prefix` (or similar) can be overridden last-in-cascade, and for Drupal projects commits a minimal `default.settings.local.php` (with `stage_file_proxy` origin pre-filled) that DDEV copies into the gitignored `settings.local.php` on post-start (with a loud confirmation if `settings.php` is gitignored). Use when the user wants to set up `ddev pull`, add a new environment (prod/stage/dev/cert) to a DDEV project, configure database and files sync from a remote server, fix a missing or broken provider, bootstrap a WordPress wp-config for a fresh clone, set up Drupal's `settings.local.php` on a fresh clone, or mentions needing a "DDEV provider" or "DDEV setup". The skill detects the project's CMS (Drupal vs WordPress) from the codebase and selects the correct templates.
 ---
 
 # DDEV Setup
@@ -9,6 +9,7 @@ Bring a Drupal or WordPress project to a functional DDEV state. Two concerns:
 
 1. **Provider file** — `.ddev/providers/<name>.yaml` so `ddev pull <name>` can sync a database and user-uploaded files from a remote server.
 2. **WordPress wp-config bootstrap** (WordPress only) — commit a `wp-config-local.php` that DDEV copies into `wp-config.php` on first start if it's missing, plus a `wp-config-override.php` that's included last in the config cascade so per-project overrides (notably `$table_prefix`) win.
+3. **Drupal settings.local.php bootstrap** (Drupal only) — commit a project-specific `sites/default/default.settings.local.php` (seeded from `templates/settings.local.php` with `stage_file_proxy` origin filled in), wire a `post-start` hook that copies it into the gitignored `sites/default/settings.local.php` on fresh clones, and uncomment the include block in `settings.php` so the override file actually loads. Requires `settings.php` to be tracked in git; if it isn't, the skill flags this and requires explicit confirmation before proceeding.
 
 Templates live in `templates/` alongside this file.
 
@@ -45,7 +46,7 @@ Ask the user for what you don't already know. Reasonable things to offer default
 | Backup path | Same as Remote path — don't prompt. The dump is written there, rsynced, then removed. |
 
 **Drupal-specific:**
-- `FILES_SUBPATH` — default `web/sites/default/files`. Change if the project uses a different docroot (e.g. `docroot/sites/default/files`, or `sites/default/files` for non-composer sites).
+- `FILES_SUBPATH` — default `web/sites/default/files`. Change if the project uses a different docroot (e.g. `docroot/sites/default/files`, or `sites/default/files` for non-composer sites). Only consulted if the user opts out of `stage_file_proxy` and switches `files_import_command` back to a real rsync (see Step 4d and the template comments). The default Drupal provider doesn't actually use this value at runtime, but it's still substituted into the file in case the user enables the rsync later.
 
 If the user only has an `~/.ssh/config` alias (e.g. `islandhealth-prod`) and no separate user/port/keyfile, warn them: `affinity-clone` requires both a `*HOST*` and a `*USER*` env var in the provider file. Either resolve the alias (`ssh -G <alias> | grep -E '^(user|hostname|port|identityfile)'`) and fill the fields, or leave it — but `affinity-clone`'s preflight parser will refuse the file.
 
@@ -135,6 +136,110 @@ Why each piece matters:
 
 Merge with existing `hooks:` block (same rules as Step 4 for `post-start`).
 
+## Step 4d — Drupal only: bootstrap `settings.local.php`
+
+Goal: on a fresh clone, `ddev start` should produce a working `sites/default/settings.local.php` automatically, so per-developer overrides (local DB creds via DDEV's `settings.ddev.php`, dev services, disabled caches, etc.) apply without manual setup.
+
+We ship a minimal `templates/settings.local.php` (alongside this SKILL.md) that's deliberately shorter than Drupal core's `example.settings.local.php`. It includes a `stage_file_proxy` origin (filled in at setup time), verbose error display, disabled CSS/JS aggregation, and null render/page caches. `settings.php` already contains a commented-out block that includes `settings.local.php` if present — we just need to:
+
+1. Gather the production URL for `stage_file_proxy`.
+2. Make sure the include block in `settings.php` is uncommented.
+3. Commit the seed file to a non-ignored path so `post-start` can copy it into place on fresh clones.
+
+### Step 4d.1 — Verify `settings.php` is tracked in git
+
+**This workflow only works if `sites/default/settings.php` is tracked in the repo.** The include-block edit lives in `settings.php`, so if the file is gitignored, your change won't reach teammates or deployments — fresh clones will copy `settings.local.php` into place but `settings.php` won't include it, and any deploy that regenerates `settings.php` from scratch will silently drop the include.
+
+From the project root, check:
+
+```bash
+git check-ignore -v web/sites/default/settings.php 2>/dev/null && echo "IGNORED" || echo "tracked"
+git ls-files --error-unmatch web/sites/default/settings.php 2>/dev/null && echo "tracked in index" || echo "NOT tracked"
+```
+
+(Adjust `web/` to the project's docroot — `docroot/`, or empty for non-composer sites.)
+
+**If `settings.php` is gitignored or untracked**, STOP and flag this loudly to the user before doing anything else. Use AskUserQuestion to make them confirm. Example wording:
+
+> ⚠️ `sites/default/settings.php` is **gitignored** in this project. The `settings.local.php` bootstrap I'm about to set up edits `settings.php` to uncomment the `settings.local.php` include block — but since `settings.php` isn't tracked, that edit won't reach other developers or your deployment pipeline.
+>
+> This means manual deployment steps will be required: every environment (staging, production, teammates' fresh clones) will need someone to hand-edit `settings.php` to uncomment the include, or your deploy tooling needs to template it in. Otherwise the local-overrides block silently does nothing on those environments.
+>
+> Options:
+> 1. **Proceed anyway** — I'll make the edit locally and you'll document the manual deploy step yourself.
+> 2. **Track `settings.php` in git first** — remove it from `.gitignore` (or the `web/sites/default/.gitignore`), commit the canonical file, then I'll continue. Recommended.
+> 3. **Skip the `settings.local.php` bootstrap** — leave things as-is.
+
+Do not proceed past this question without an explicit choice. If they pick (1), record the decision in the final summary so they can't forget the manual deploy work.
+
+### Step 4d.2 — Gather the production URL
+
+Ask the user for the canonical production URL for `stage_file_proxy` — the scheme + host where missing files should be fetched from (e.g. `https://www.example.ca`). No trailing slash. This gets substituted into `{{PROD_URL}}` in the template.
+
+If the user is unsure or the site doesn't have a public production URL yet, set it to an empty string and tell them to fill it in later (the `stage_file_proxy` module will simply do nothing until the origin is populated). Don't block setup on this.
+
+### Step 4d.3 — Uncomment the include block in `settings.php`
+
+Drupal's default `settings.php` contains this block at the bottom, commented out:
+
+```php
+# if (file_exists($app_root . '/' . $site_path . '/settings.local.php')) {
+#   include $app_root . '/' . $site_path . '/settings.local.php';
+# }
+```
+
+Uncomment it (remove the leading `# ` from those three lines). If the block is missing entirely (some older or hand-tuned `settings.php` files lack it), append the uncommented form at the end of the file.
+
+### Step 4d.4 — Commit the seed file
+
+Read `~/.claude/skills/ddev-setup/templates/settings.local.php` (resolve `~` to the user's home directory). Replace `{{PROD_URL}}` with the value from Step 4d.2. Write the result to:
+
+```
+<docroot>/sites/default/default.settings.local.php
+```
+
+`<docroot>` is `web` for composer-based projects (`drupal/recommended-project`), `docroot` for some legacy layouts, or empty for non-composer sites. Read it from `.ddev/config.yaml`'s `docroot:` field.
+
+**Why `default.settings.local.php` and not `example.settings.local.php`:** the file ships as the seed that `post-start` copies into the gitignored `settings.local.php`. Calling it `default.` (not `example.`) keeps it distinct from Drupal core's untouched `example.settings.local.php`, so the two coexist without confusion and so this file is obviously the project-specific one.
+
+This file MUST be tracked in git. Verify it's not caught by a `sites/*/settings.local.php` glob in `.gitignore` (the standard Drupal gitignore uses that pattern, which will also match `default.settings.local.php`). If it is, add a negation:
+
+```
+# .gitignore
+sites/*/settings.local.php
+!sites/*/default.settings.local.php
+```
+
+### Step 4d.5 — Ensure `settings.local.php` (the runtime copy) is gitignored
+
+The standard Drupal `.gitignore` (and `web/sites/.gitignore` shipped by `drupal/recommended-project`) already excludes `settings.local.php`. Verify with `git check-ignore -v <docroot>/sites/default/settings.local.php`. If it's not ignored, add `sites/*/settings.local.php` to the appropriate `.gitignore` — this file is per-developer and must never be committed. (Pair with the `!default.settings.local.php` negation from Step 4d.4 so the seed file stays tracked.)
+
+### Step 4d.6 — Wire the copy into `post-start`
+
+Add to `.ddev/config.yaml`:
+
+```yaml
+hooks:
+  post-start:
+    - exec-host: test -f <docroot>/sites/default/settings.local.php || cp <docroot>/sites/default/default.settings.local.php <docroot>/sites/default/settings.local.php
+```
+
+Merge with any existing `hooks: post-start:` block (same rules as Step 4 — append to the list, don't replace).
+
+**Why `post-start` and not `pre-start`:** `pre-start` runs before the web container exists, so any error in the hook prevents DDEV from coming up at all. `post-start` runs after the container is healthy, so a copy failure produces a warning rather than a hard failure. The copy itself runs on the host, so container state doesn't matter — `post-start` is purely about failure isolation.
+
+### Step 4d.7 — Remind the user to enable `stage_file_proxy`
+
+The template references `stage_file_proxy.settings`, but that config only takes effect if the module is installed and enabled. Tell the user to:
+
+```bash
+ddev composer require drupal/stage_file_proxy
+ddev drush en stage_file_proxy -y
+ddev drush cex -y   # export the enabled state to config
+```
+
+If the project doesn't want `stage_file_proxy` (e.g. files are synced via `ddev pull`), they can comment out or remove the `$config['stage_file_proxy.settings']['origin']` line from `default.settings.local.php` before committing.
+
 ## Step 5 — WordPress only: bootstrap `wp-config.php`
 
 Skip for Drupal.
@@ -174,13 +279,17 @@ ddev restart
 ddev pull <environment-name>
 ```
 
-`ddev restart` triggers the new post-start hook so `ddev auth ssh` runs once and loads their keys for the session. On a fresh clone it will also run the `pre-start` hook that seeds `wp-config.php` from `wp-config-local.php` (WordPress).
+`ddev restart` triggers the new post-start hook so `ddev auth ssh` runs once and loads their keys for the session. On a fresh clone it will also run the `pre-start` hook that seeds `wp-config.php` from `wp-config-local.php` (WordPress), or the `post-start` hook that seeds `settings.local.php` from `default.settings.local.php` (Drupal).
+
+If the user chose to proceed with the `settings.local.php` bootstrap despite `settings.php` being gitignored (Step 4d.1, option 1), restate the manual deployment requirement here so it's the last thing they see: every other environment needs `settings.php` hand-edited (or templated by deploy tooling) to uncomment the `settings.local.php` include block, or the bootstrap silently does nothing there.
 
 ## Notes on the template shape
 
 - Both templates use `environment_variables` with `ssh_user` and `ssh_host` (lowercase). The `affinity-clone` script parses these case-insensitively but requires exactly one variable containing `HOST` and one containing `USER` — don't add a second (e.g. don't introduce a `remote_user` alongside `ssh_user`).
 - Push commands are stubbed out with an "unsupported" message by default. This is deliberate: accidental `ddev push prod` is a disaster. Only enable pushes for non-production targets, and only if the user explicitly asks.
-- Both templates use `files_import_command` (not `files_pull_command`) to rsync the files directory. This is deliberate: defining `files_pull_command` alongside an rsync that writes to the final destination makes DDEV run its default import step afterwards, which rsyncs from the (empty) `.ddev/.downloads/files/` staging dir into the project uploads/files dir with delete semantics — wiping everything just pulled. Omitting `files_pull_command` skips that default. For large sites the user may prefer `stage_file_proxy` instead — in that case, replace the `files_import_command` body with a no-op `echo` (see the islandhealth-style prod examples in the user's project checkouts).
+- Both templates use `files_import_command` (not `files_pull_command`) for the files-directory handoff. This is deliberate: defining `files_pull_command` alongside an `files_import_command` that writes to the final destination makes DDEV run its default import step afterwards, which rsyncs from the (empty) `.ddev/.downloads/files/` staging dir into the project uploads/files dir with delete semantics — wiping local files. Omitting `files_pull_command` skips that default.
+- **Drupal default is a no-op `echo` that defers to `stage_file_proxy`.** The Drupal template ships `files_import_command` as a stub that prints a message saying this environment relies on `stage_file_proxy` (configured in `settings.local.php` from Step 4d). This pairs with the `default.settings.local.php` template's `$config['stage_file_proxy.settings']['origin']` line. If the user wants a real rsync instead (small sites, or environments without HTTP access to production), tell them to replace the body per the comment block inside the template — and remind them to remove the `stage_file_proxy` origin config or disable the module so the two mechanisms don't both run.
+- WordPress's `files_import_command` is a real rsync — no `stage_file_proxy` equivalent in the WP ecosystem.
 
 ## Tip: per-project key auto-loading (optional)
 

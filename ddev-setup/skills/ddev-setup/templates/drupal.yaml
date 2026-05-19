@@ -35,19 +35,31 @@ db_pull_command:
     ssh -p${ssh_port} ${ssh_user}@${ssh_host} "rm -f ${backup_path}/db.sql.gz"
   service: web
 
-# Uses files_import_command (not files_pull_command) so the rsync writes
-# directly to the final destination. files_pull_command is intentionally
-# omitted — if it were present, DDEV's default import step would rsync from
-# an empty .ddev/.downloads/files/ into the files directory with delete
-# semantics and wipe everything we just pulled.
+# files_import_command is a no-op by default: this skill's Drupal setup
+# pairs the provider with stage_file_proxy (configured in settings.local.php),
+# so missing files are fetched lazily from production on first request instead
+# of bulk-rsynced on every `ddev pull`. This keeps `ddev pull` fast even on
+# large sites and avoids burning disk on rarely-accessed media.
 #
-# --size-only: rsync's default size+mtime check re-transfers files every pull
-# because mutagen/container mounts don't preserve mtimes faithfully. Uploaded
-# files are immutable (same name = same content), so size comparison is safe.
+# files_pull_command is intentionally omitted — if it were present alongside
+# this no-op, DDEV's default import step would rsync from an empty
+# .ddev/.downloads/files/ into the files directory with delete semantics and
+# wipe local cached files.
+#
+# If you want a real files sync instead of stage_file_proxy (small sites, or
+# environments where you can't reach production over HTTP), replace the body
+# below with:
+#   rsync -e "ssh -p\"${ssh_port}\"" -av --size-only \
+#     "${ssh_user}"@"${ssh_host}":"${remote_path}"/{{FILES_SUBPATH}}/ \
+#     /var/www/html/{{FILES_SUBPATH}}/
+# --size-only is recommended: rsync's default size+mtime check re-transfers
+# files every pull because mutagen/container mounts don't preserve mtimes
+# faithfully. Uploaded files are immutable (same name = same content), so
+# size comparison is safe.
 files_import_command:
   command: |
     set -eu -o pipefail
-    rsync -e "ssh -p\"${ssh_port}\"" -av --size-only "${ssh_user}"@"${ssh_host}":"${remote_path}"/{{FILES_SUBPATH}}/ /var/www/html/{{FILES_SUBPATH}}/
+    echo "Skipping files pull — this environment relies on stage_file_proxy to fetch missing files from production on demand. See sites/default/settings.local.php for the configured origin."
   service: web
 
 # Pushing a database or files to a remote environment is dangerous and not
