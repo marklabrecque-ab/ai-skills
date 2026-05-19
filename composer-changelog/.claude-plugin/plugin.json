@@ -1,7 +1,7 @@
 {
   "name": "composer-changelog",
-  "version": "0.1.0",
-  "description": "Analyze composer.lock diffs for Drupal projects and produce a Markdown report of breaking changes, deprecations, and security fixes.",
+  "version": "0.2.0",
+  "description": "Analyze composer.lock diffs for Drupal projects and produce a Markdown report of breaking changes, deprecations, and security fixes. Includes a secondary audit of composer.json version pins with per-package recommendation, risk profile, and manual test steps.",
   "author": {
     "name": "Mark Labrecque",
     "email": "mark@affinitybridge.com"

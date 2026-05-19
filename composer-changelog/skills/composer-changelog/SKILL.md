@@ -1,6 +1,6 @@
 ---
 name: composer-changelog
-description: Analyzes a composer.lock diff for Drupal projects, fetches release notes and changelogs for changed production dependencies from Drupal.org, and produces a Markdown report highlighting breaking changes, deprecations, and security fixes. Always includes a summary of drupal/core changes when present. Use this skill whenever the user provides a composer.lock diff, git diff output involving composer.lock, or asks about the impact of Drupal dependency updates — even if they just say "what changed in composer", "review these package updates", "what do I need to check after this composer update", or pastes a composer.lock diff without further explanation.
+description: Analyzes a composer.lock diff for Drupal projects, fetches release notes and changelogs for changed production dependencies from Drupal.org, and produces a Markdown report highlighting breaking changes, deprecations, and security fixes. Always includes a summary of drupal/core changes when present. As a secondary pass, audits composer.json version pins for available updates that haven't been applied yet, producing an appendix with a per-package recommendation, risk profile, and manual test steps. Use this skill whenever the user provides a composer.lock diff, git diff output involving composer.lock, or asks about the impact of Drupal dependency updates — even if they just say "what changed in composer", "review these package updates", "what do I need to check after this composer update", "audit outdated pins", or pastes a composer.lock diff without further explanation.
 ---
 
 # Composer Changelog Analyzer
@@ -239,7 +239,86 @@ For each match found, record the file path, line number, and a snippet of contex
 
 If no custom code is found using the changed API, say so explicitly rather than omitting this section — it's reassuring to confirm the coast is clear.
 
-## Step 5: Write the Markdown report
+## Step 5: Outdated pin audit (secondary pass)
+
+After the primary lock-diff analysis, run a separate pass over `composer.json`'s production `require` block to identify version pins that *could* be updated but haven't been. This produces the **Appendix: Outdated Pin Audit** section of the report.
+
+This pass is independent of the lock diff — it audits the *current* state of pins regardless of whether they were touched in the diff. Run it even when no packages changed in `composer.lock`.
+
+### Step 5a: Collect candidates
+
+Run `composer outdated` with JSON output for direct dependencies only:
+
+```bash
+composer outdated --direct --format=json --no-interaction
+```
+
+For each entry, record:
+- `name` — package name
+- `version` — currently installed version
+- `latest` — latest available version
+- `latest-status` — one of `up-to-date`, `semver-safe-update`, `update-possible`
+- `description` — short package description
+
+Skip packages where `latest-status` is `up-to-date`. Also skip the metapackages listed in Step 1 (`drupal/core-recommended` etc.) — when `drupal/core` itself is outdated, that's the package to report on.
+
+Also read the constraint string from `composer.json`'s `require` block for each candidate (e.g. `^1.5`, `~2.3.0`, `1.18.*`). The constraint determines whether `composer update` alone would pick up the new version, or whether `composer.json` needs to be edited first.
+
+### Step 5b: Classify the version jump
+
+For each candidate, parse the SemVer delta between `version` and `latest`:
+
+- **Patch** — only the patch component changed (e.g. `1.5.3 → 1.5.7`)
+- **Minor** — minor component changed (e.g. `1.5.3 → 1.8.0`)
+- **Major** — major component changed (e.g. `1.5.3 → 2.0.0`)
+- **Pre-release crossing** — moving from stable to `-rc`/`-beta`/`-alpha` or vice versa
+- **Drupal legacy** — `8.x-1.18` style; treat the second number as minor
+
+For `drupal/*` packages, also fetch the XML release-history feed (reuse Step 2a logic) to:
+- Confirm the `latest` value matches what Drupal.org considers current
+- Enumerate intermediate releases tagged "Security update" or "New features" between installed and latest — these escalate the risk profile and the recommendation
+
+### Step 5c: Determine recommendation and risk profile
+
+For each candidate, produce three fields:
+
+**Recommendation** — one of:
+- **Recommended** — patch or small minor bump with no breaking changes flagged; or any version that fixes an open security advisory affecting the installed version
+- **Recommended with caution** — minor bump that crosses a release tagged "New features", or where release notes flag deprecations; safe to take but warrants a test pass
+- **Hold** — major bump, pre-release crossing, or release notes explicitly flag breaking changes / required migration steps; do not update without a dedicated upgrade ticket
+- **Skip** — package is abandoned, replaced, or the constraint in `composer.json` was deliberately pinned (look for an adjacent comment in `composer.json`, or check git blame on that line if uncertain)
+
+**Risk profile** — short paragraph covering:
+- Size of jump (patch / minor / major / pre-release)
+- Whether any intermediate release is a security update (cite the SA ID)
+- Whether release notes mention: database updates, config schema changes, removed APIs, hook renames, service-definition changes
+- Whether the current `composer.json` constraint would accept the new version on its own (`composer update {package}`) or requires editing the constraint first
+- Whether the package has patches configured in `extra.patches` — if so, note that those patches will need re-validation against the new version (cross-reference Step 1b logic)
+
+**Manual test steps** — concrete, project-specific QA steps tailored to what the package does. Do not write generic "smoke test the site". Use these heuristics based on the package:
+- **drupal/core** — visit the homepage logged-out and logged-in; run `drush updb` and `drush cr`; check the status report (`/admin/reports/status`); exercise one content-creation workflow end-to-end
+- **Editor / WYSIWYG modules** (`drupal/ckeditor*`, `drupal/editor_*`) — open an existing node edit form for each text format; verify toolbar buttons render; save and reload to confirm markup round-trips
+- **Field / paragraphs / layout modules** (`drupal/paragraphs`, `drupal/layout_builder_*`, `drupal/field_group`) — edit and re-save a node that uses the affected field type; verify rendered output on the front end is unchanged
+- **Search / Solr / facets** — re-index a small content set; run a representative query and confirm result count and facet counts
+- **Migrate / migration modules** — dry-run a representative migration with `drush migrate:import --limit=5 --update`
+- **Webform / form modules** — submit a representative form; verify submission appears in the admin UI and any email/handler fires
+- **Commerce / payment modules** — run a test checkout end-to-end against a sandbox gateway
+- **Symfony / Guzzle / non-Drupal libraries** — run the project's PHPUnit / Behat suite if present; otherwise note "no targeted manual test — rely on automated tests"
+- **Theme / front-end build packages** — rebuild assets and visually diff key pages
+- **CLI / dev tooling** (`drush/drush`, `phpstan/*`, `phpunit/*`) — run the tool's main command and confirm it still works against the project
+
+Always tailor: if you can see from custom code (Step 4 search) that a hook or service from the package is used in custom modules, add a specific test step for that integration point.
+
+If the package was already covered in the **High-Impact Changes** section of the main report (i.e. it was part of the lock diff), do not repeat it in the Appendix — the primary report already covers it.
+
+### Step 5d: Skip the audit gracefully
+
+Skip this entire step if:
+- `composer outdated` is not available (very old Composer) — note in the report that the audit was skipped
+- `composer.json` is absent or unreadable
+- `composer outdated --direct` returns an empty list — note "All direct dependencies are at their latest available version" in the Summary and omit the Appendix
+
+## Step 6: Write the Markdown report
 
 Save to `docs/composer-update-notes.md` unless the user specifies another path.
 
@@ -317,6 +396,42 @@ Generated: {YYYY-MM-DD}
 ## Packages Updated — No Action Required
 - `drupal/foo`: 1.4.0 → 1.5.0 — {use field_release_short_description if available, otherwise "bug fixes only"}
 - `drupal/bar`: 2.1.1 → 2.1.3 — (changelog unavailable)
+
+---
+
+## Appendix: Outdated Pin Audit
+
+{Generated from `composer outdated --direct` against the current `composer.json`. Lists direct production dependencies that are behind their latest available release but were not touched in this update. Packages already covered in the main report are not repeated here.}
+
+### Recommended
+
+#### drupal/{package}
+**{installed_version} → {latest_version}** ({patch|minor|major} bump)
+**Constraint in composer.json:** `{constraint}` — {`composer update {package}` will pick this up automatically | requires editing the constraint first}
+
+**Risk profile:** {Size of jump; whether any intermediate release is a security update (cite SA ID); any deprecations / DB updates / config-schema changes flagged in release notes; patch re-validation needed if `extra.patches` references this package.}
+
+**Manual test steps:**
+- {Concrete, package-specific QA step}
+- {Concrete, package-specific QA step}
+
+### Recommended with caution
+
+{Same structure as above. Use this bucket for minor bumps that cross a "New features" release or flag deprecations.}
+
+### Hold
+
+#### drupal/{package}
+**{installed_version} → {latest_version}** (major bump)
+**Constraint in composer.json:** `{constraint}` — requires editing the constraint first.
+
+**Risk profile:** {Why this is a hold — explicit breaking changes, removed APIs, pre-release crossing, etc. Cite the specific release notes.}
+
+**Manual test steps:** Defer until a dedicated upgrade ticket is scheduled.
+
+### Skip
+
+- `vendor/{package}`: {installed} → {latest} — {reason for skipping: abandoned, deliberately pinned with comment, replaced by another package, etc.}
 ```
 
 **Formatting notes:**
@@ -328,6 +443,9 @@ Generated: {YYYY-MM-DD}
 - Omit the **Patch Status** section entirely if no updated packages have patches configured — don't include it as an empty section
 - If all patches on updated packages still apply cleanly, note this briefly in the Summary and omit the Patch Status section
 - In the Summary, always call out patches that no longer apply or need rebasing — these are blocking issues for deployment
+- Omit any **Appendix** bucket (Recommended / Recommended with caution / Hold / Skip) that has no entries — don't render empty headings
+- Omit the **Appendix: Outdated Pin Audit** section entirely if `composer outdated --direct` returned no candidates; mention "All direct dependencies are at their latest available version" in the Summary instead
+- If the audit was skipped (no `composer outdated` available, no `composer.json`), note that in the Summary in place of the Appendix
 
 ## If something goes wrong
 
