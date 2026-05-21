@@ -48,7 +48,7 @@ If the user gave an explicit track count, use that number directly.
 
 ## Step 2 — Curate the tracklist
 
-Generate the tracklist yourself from your training knowledge — do **not** search YouTube to discover tracks. For each slot, pick a specific `Artist — Title` pair that fits the descriptor.
+Generate candidate tracks yourself from your training knowledge — do **not** search YouTube to *discover* tracks. For each slot, commit to a specific `Artist — Title (year, album)` quadruple that fits the descriptor. Requiring the year and album forces commitment to a real release and makes hallucinated phrases harder to bluff.
 
 Guidelines:
 
@@ -57,11 +57,27 @@ Guidelines:
 - Sequence the list with intent (e.g. open strong, build energy, land softer if "late-night" / "wind-down" is implied).
 - Prefer canonical studio recordings over live versions or covers unless the descriptor asks otherwise.
 
-Present the proposed tracklist to the user as a numbered list of `Artist — Title` and ask for confirmation (or edits) **before** searching YouTube. This avoids wasted API calls if the curation is off.
+### Step 2a — Verify every track against YouTube before presenting
+
+Track hallucinations are the dominant failure mode of this skill. Plausible-sounding Artist–Title pairs that the artist never actually released slip through silently because `yt-dlp` will return *some* top result for *any* query — usually a cover, lyric-channel reupload, or an unrelated song with overlapping keywords. **A top result is not proof the track exists.**
+
+Before showing the tracklist to the user, call `mcp__youtube-playlist-url__search_video` (or a single batched `build_playlist_url`) for every candidate and validate each result:
+
+- **Artist token match**: the proposed artist (or a recognizable substring — "Chemical Brothers" → "chemical brothers") must appear in either the returned `title` or `channel`, case-insensitive.
+- **Title token match**: a substantial portion of the proposed title (≥ 60% of non-stopword tokens) must appear in the returned `title`.
+- **Channel sanity**: prefer results from the artist's official channel, `*- Topic`, or a major label channel. Be suspicious of generic lyric channels ("Lyrics Vault", "Best Music 2020"), karaoke, "slowed + reverb", and 8-bit cover channels — they are common false positives for hallucinated tracks.
+
+Classify each candidate as:
+
+- ✅ **Verified** — both tokens match and channel looks legitimate.
+- ⚠️ **Unverified** — partial match, suspect channel, or the top result is clearly a cover/remix when a studio version was implied. Try one refinement via `search_video` with a tightened query (add the album or year). If still suspect, surface to the user.
+- ❌ **Likely hallucinated** — no artist match, or title tokens don't line up. **Drop it and replace** with a different candidate from the same artist's real catalogue (re-verify the replacement).
+
+Only present the tracklist to the user **after** this pass. Show each entry as `Artist — Title (year, album)` with its verification mark; for ⚠️ entries, include the one-line reason and offer a swap. Do not present ❌ entries — they should already be replaced.
 
 ## Step 3 — Resolve tracks to video IDs
 
-After the user confirms the tracklist, call `mcp__youtube-playlist-url__build_playlist_url` **once** with the full ordered list of track query strings (e.g. `"Chemical Brothers Galvanize"`). The MCP resolves each track to the top YouTube search result and returns:
+After the user confirms the tracklist, you should already have most `videoId`s cached from the Step 2a verification pass — reuse them. For any unconfirmed or swapped tracks, call `mcp__youtube-playlist-url__build_playlist_url` with the remaining ordered list of track query strings (e.g. `"Chemical Brothers Galvanize"`). The MCP resolves each track to the top YouTube search result and returns:
 
 ```json
 {
@@ -86,6 +102,8 @@ Push the comma-separated video IDs to the user's clipboard with `pbcopy` so term
 ```bash
 printf '%s' 'Xu3FTEmN-eg,ub747pprmJ8,...' | pbcopy
 ```
+
+**Verify the clipboard captured every ID.** Past incident: only 3 of 15 IDs made it through. Immediately after `pbcopy`, run `pbpaste | tr ',' '\n' | wc -l` and confirm the count matches the resolved track count. If it doesn't match, re-run the `pbcopy` (often a shell quoting issue with `&` or backticks in IDs — though IDs are normally `[A-Za-z0-9_-]{11}`, so this is rare; more often it's a truncated heredoc or a stray newline).
 
 Then tell the user:
 
