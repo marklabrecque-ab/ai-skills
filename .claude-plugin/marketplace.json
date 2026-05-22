@@ -6,6 +6,11 @@
   },
   "plugins": [
     {
+      "name": "agent-helper",
+      "source": "./agent-helper",
+      "description": "Scaffold a project-level set of self-improving Claude Code agents (planner, implementor, tester, reviewer) plus an optional development workflow document."
+    },
+    {
       "name": "claude-context-management",
       "source": "./claude-context-management",
       "description": "Skills for managing Claude Code's local context (orphan-data cleanup, etc.)."
