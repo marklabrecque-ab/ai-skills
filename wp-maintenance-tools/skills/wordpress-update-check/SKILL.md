@@ -22,7 +22,7 @@ Produces a markdown risk report covering every pending WordPress plugin update o
 
 ## Output
 
-- **Report**: `docs/wordpress-update-check-YYYY-MM-DD.md` (overwrite if a same-day run already exists, after a one-line confirmation)
+- **Report**: `docs/wordpress-retainer-report-YYYY-MM-DD.md` (overwrite if a same-day run already exists, after a one-line confirmation)
 - **Working files**: `scratch/wordpress-update-check/<run-id>/` — fetched zips, extracted trees, raw diffs. Gitignored. Keep these around so the user can dig deeper after reading the report.
 - **Terminal**: a short summary table at the end (plugin, current → new, risk, link to its section in the report), followed by two wp-cli command suggestions.
 
@@ -122,7 +122,7 @@ If a plugin is skipped, its rating is **skipped (manual review required)**.
 
 ### Step 7 — Write the report
 
-Path: `docs/wordpress-update-check-YYYY-MM-DD.md`. If `docs/` doesn't exist, create it. If today's report already exists, ask before overwriting.
+Path: `docs/wordpress-retainer-report-YYYY-MM-DD.md`. If `docs/` doesn't exist, create it. If today's report already exists, ask before overwriting.
 
 Use this exact structure:
 
@@ -182,7 +182,7 @@ After writing the report, echo the summary table and the two suggested wp-cli co
 Example:
 
 ```
-Wrote docs/wordpress-update-check-2026-05-11.md
+Wrote docs/wordpress-retainer-report-2026-05-11.md
 
 Plugin                Current → New        Risk
 --------------------  -------------------  -------
