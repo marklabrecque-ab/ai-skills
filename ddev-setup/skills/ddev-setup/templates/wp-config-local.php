@@ -11,12 +11,28 @@
  * belong in wp-config-override.php, which is included LAST so it wins.
  */
 
+// Mark this environment as local. WordPress core's wp_get_environment_type()
+// defaults to 'production' when this constant is unset, so prod (which never
+// receives this file — wp-config.php is gitignored) stays fail-closed.
+if (!defined("WP_ENVIRONMENT_TYPE")) define("WP_ENVIRONMENT_TYPE", "local");
+
 // DDEV-managed database credentials, URLs, etc.
 if (file_exists(__DIR__ . "/wp-config-ddev.php")) {
     require_once __DIR__ . "/wp-config-ddev.php";
 }
 
 $table_prefix = "wp_";
+
+// stage_file_proxy: fetch missing uploads from production on demand.
+// Gated on WP_ENVIRONMENT_TYPE so that even if this define somehow leaked
+// into a committed file, prod (where WP_ENVIRONMENT_TYPE is undefined or
+// 'production') bails. We check the constant directly rather than calling
+// wp_get_environment_type() because WordPress core isn't loaded yet at
+// wp-config parse time. The alleyinteractive/stage-file-proxy plugin reads
+// STAGE_FILE_PROXY_URL and no-ops when it's undefined.
+if (defined("WP_ENVIRONMENT_TYPE") && WP_ENVIRONMENT_TYPE !== "production") {
+    if (!defined("STAGE_FILE_PROXY_URL")) define("STAGE_FILE_PROXY_URL", "{{STAGE_FILE_PROXY_URL}}");
+}
 
 // DDEV's wp-config-ddev.php already defines WP_DEBUG. Guard to avoid a
 // duplicate-define warning that prints before <!DOCTYPE> and breaks layout.

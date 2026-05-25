@@ -1,6 +1,6 @@
 ---
 name: ddev-setup
-description: Sets up a functional DDEV environment for a Drupal or WordPress project. Creates DDEV provider YAML files (.ddev/providers/*.yaml) for `ddev pull`, wires `ddev auth ssh` into post-start, for WordPress projects bootstraps a committed `wp-config-local.php` + `wp-config-override.php` pair so fresh clones boot cleanly and `$table_prefix` (or similar) can be overridden last-in-cascade, and for Drupal projects commits a minimal `default.settings.local.php` (with `stage_file_proxy` origin pre-filled) that DDEV copies into the gitignored `settings.local.php` on post-start (with a loud confirmation if `settings.php` is gitignored). Use when the user wants to set up `ddev pull`, add a new environment (prod/stage/dev/cert) to a DDEV project, configure database and files sync from a remote server, fix a missing or broken provider, bootstrap a WordPress wp-config for a fresh clone, set up Drupal's `settings.local.php` on a fresh clone, or mentions needing a "DDEV provider" or "DDEV setup". The skill detects the project's CMS (Drupal vs WordPress) from the codebase and selects the correct templates.
+description: Sets up a functional DDEV environment for a Drupal or WordPress project. Creates DDEV provider YAML files (.ddev/providers/*.yaml) for `ddev pull`, wires `ddev auth ssh` into post-start, for WordPress projects bootstraps a committed `wp-config-local.php` + `wp-config-override.php` pair so fresh clones boot cleanly and `$table_prefix` (or similar) can be overridden last-in-cascade (with optional `stage_file_proxy` setup via the alleyinteractive plugin, gated on `WP_ENVIRONMENT_TYPE` so prod stays inert), and for Drupal projects commits a minimal `default.settings.local.php` (with `stage_file_proxy` origin pre-filled) that DDEV copies into the gitignored `settings.local.php` on post-start (with a loud confirmation if `settings.php` is gitignored). Use when the user wants to set up `ddev pull`, add a new environment (prod/stage/dev/cert) to a DDEV project, configure database and files sync from a remote server, fix a missing or broken provider, bootstrap a WordPress wp-config for a fresh clone, set up Drupal's `settings.local.php` on a fresh clone, or mentions needing a "DDEV provider" or "DDEV setup". The skill detects the project's CMS (Drupal vs WordPress) from the codebase and selects the correct templates.
 ---
 
 # DDEV Setup
@@ -323,6 +323,77 @@ If the user has an existing `wp-config.php` they want to keep, leave it alone an
 
 **Why the WP_DEBUG defines are guarded:** DDEV's auto-generated `wp-config-ddev.php` already defines `WP_DEBUG`. A second `define('WP_DEBUG', ...)` in our file produces a PHP warning that fires during wp-config.php parsing — before WordPress has applied `WP_DEBUG_DISPLAY = false` — so the warning text prints into the response body *before* `<!DOCTYPE html>`. That knocks the browser into quirks mode and silently breaks Elementor/theme layout. The `if (!defined(...)) define(...)` guards in the template prevent this. Never "simplify" them away.
 
+## Step 5b — WordPress only: bootstrap `stage_file_proxy` (optional)
+
+Goal: let local clones pull missing uploads on demand from production via the [alleyinteractive/stage-file-proxy](https://github.com/alleyinteractive/stage-file-proxy) plugin, without ever activating that behavior in production.
+
+This is **optional**. Ask the user whether they want it — if files are small and `ddev pull` is fine, skip. If uploads are large (hundreds of MB+) and a full rsync on every pull is painful, this is the right tool.
+
+### Step 5b.1 — Gather the production URL
+
+Ask the user for the scheme + host where missing uploads should be fetched from (e.g. `https://www.example.ca`). No trailing slash. This gets substituted into `{{STAGE_FILE_PROXY_URL}}` in the `wp-config-local.php` template.
+
+If they decline `stage_file_proxy`, set the value to an empty string — the gate in the template still applies, and the plugin no-ops on an empty URL anyway. (Or strip the block entirely — your call.)
+
+### Step 5b.2 — Verify the wp-config bootstrap is in place
+
+Step 5 must have run first. The `wp-config-local.php` template ships with two pieces that make this safe:
+
+1. `define("WP_ENVIRONMENT_TYPE", "local")` near the top — flags this environment as non-production. The committed seed only ever becomes the gitignored `wp-config.php` on developer machines (via the `pre-start` copy), so prod never sees it.
+2. A gated `STAGE_FILE_PROXY_URL` define:
+
+   ```php
+   if (defined("WP_ENVIRONMENT_TYPE") && WP_ENVIRONMENT_TYPE !== "production") {
+       if (!defined("STAGE_FILE_PROXY_URL")) define("STAGE_FILE_PROXY_URL", "{{STAGE_FILE_PROXY_URL}}");
+   }
+   ```
+
+   `WP_ENVIRONMENT_TYPE` is checked as a raw constant (not via `wp_get_environment_type()`) because WordPress core isn't loaded yet at wp-config.php parse time. If the constant is **undefined**, the gate fails closed — that matches core's own default (`wp_get_environment_type()` returns `'production'` when unset), so prod is safe by omission.
+
+### Step 5b.3 — Install the plugin
+
+```bash
+ddev composer require alleyinteractive/stage-file-proxy
+```
+
+If the project isn't composer-managed, fall back to manual install in `wp-content/plugins/`. The plugin code is inert without `STAGE_FILE_PROXY_URL` defined, so shipping it to prod is fine — same posture as Drupal's `stage_file_proxy` module in Step 4d.
+
+### Step 5b.4 — Activate the plugin on local only
+
+WordPress stores active plugins in `wp_options.active_plugins`, which gets pulled down by `ddev pull` from prod. Two approaches:
+
+**Recommended:** Leave the plugin deactivated in prod's DB. Add an activation step to the `post-import-db` hook from Step 4c, so every `ddev pull` reactivates it locally after the prod DB lands:
+
+```yaml
+hooks:
+  post-import-db:
+    # ... existing search-replace lines from Step 4c ...
+    - exec: wp plugin activate stage-file-proxy
+```
+
+Place it after the search-replace lines but before `wp cache flush` (so the cache flush also clears anything the plugin's activation hook touched).
+
+**Alternative:** If the user can't or won't keep it deactivated in prod's DB (e.g. they manage activation via a deploy script that hard-sets the list), they can rely on the `STAGE_FILE_PROXY_URL` gate alone. The plugin runs on every request in prod, sees no URL, and bails. Same end state as the Drupal empty-origin pattern. Tell them this is acceptable but less defense-in-depth than keeping it deactivated.
+
+### Step 5b.5 — How prod stays safe (explain to the user)
+
+Same shape as Step 4d.8 for Drupal. The layers:
+
+| Deployed | Functional on prod? | Notes |
+|---|---|---|
+| Plugin code (composer) | inert | no `STAGE_FILE_PROXY_URL` → no-op |
+| `wp-config-local.php` seed (contains prod URL as a literal) | inert | never `include`d on prod; prod's `wp-config.php` is hand-written or templated by deploy, not seeded from this file |
+| `STAGE_FILE_PROXY_URL` constant | never defined on prod | gated on `WP_ENVIRONMENT_TYPE !== 'production'`, which is also never set on prod |
+| Plugin activation row in `wp_options` | deactivated in prod | re-activated locally via `post-import-db` hook after each pull |
+
+**What does NOT deploy to prod:**
+
+- `wp-config.php` — gitignored, only exists on dev machines after `ddev start` runs the pre-start copy
+- `WP_ENVIRONMENT_TYPE` — only defined inside `wp-config-local.php`, which only lands on local
+- `STAGE_FILE_PROXY_URL` — gated behind the env-type check, so even if it leaked into a committed file it wouldn't fire on prod
+
+**Bottom line:** the design fails closed in three independent ways. An attacker (or an accidental commit of `wp-config.php`) would need to defeat all three — the env-type check, the constant gate, and the deactivated plugin row — before stage_file_proxy could make an outbound request from prod.
+
 ## Step 6 — Tell the user what's next
 
 ```
@@ -340,7 +411,7 @@ If the user chose to proceed with the `settings.local.php` bootstrap despite `se
 - Push commands are stubbed out with an "unsupported" message by default. This is deliberate: accidental `ddev push prod` is a disaster. Only enable pushes for non-production targets, and only if the user explicitly asks.
 - Both templates use `files_import_command` (not `files_pull_command`) for the files-directory handoff. This is deliberate: defining `files_pull_command` alongside an `files_import_command` that writes to the final destination makes DDEV run its default import step afterwards, which rsyncs from the (empty) `.ddev/.downloads/files/` staging dir into the project uploads/files dir with delete semantics — wiping local files. Omitting `files_pull_command` skips that default.
 - **Drupal default is a no-op `echo` that defers to `stage_file_proxy`.** The Drupal template ships `files_import_command` as a stub that prints a message saying this environment relies on `stage_file_proxy` (configured in `settings.local.php` from Step 4d). This pairs with the `default.settings.local.php` template's `$config['stage_file_proxy.settings']['origin']` line. If the user wants a real rsync instead (small sites, or environments without HTTP access to production), tell them to replace the body per the comment block inside the template — and remind them to remove the `stage_file_proxy` origin config or disable the module so the two mechanisms don't both run.
-- WordPress's `files_import_command` is a real rsync — no `stage_file_proxy` equivalent in the WP ecosystem.
+- WordPress also supports `stage_file_proxy` (Step 5b) via the [alleyinteractive/stage-file-proxy](https://github.com/alleyinteractive/stage-file-proxy) plugin. If the user opts in, the `files_import_command` can be neutralized the same way the Drupal default is — see the comment block in `wordpress.yaml`.
 
 ## Tip: per-project key auto-loading (optional)
 
