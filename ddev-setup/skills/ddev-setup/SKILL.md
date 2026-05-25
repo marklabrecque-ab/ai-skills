@@ -317,6 +317,13 @@ Approach:
 
 5. Tell the user to edit `wp-config-override.php` to set their override (e.g. `$table_prefix = 'custom_';`) and commit both files.
 
+> ⚠️ **If a `wp-config.php` already exists at the project root, the pre-start hook silently skips the copy** (`test -f ... ||` short-circuits). The user has to decide:
+>
+> - **Re-seed from the template** — delete the existing file and run `ddev restart` (or `cp wp-config-local.php wp-config.php` directly). Required if later steps add defines that the live file doesn't have yet (notably `STAGE_FILE_PROXY_URL` and `WP_ENVIRONMENT_TYPE` in Step 5b).
+> - **Hand-merge** — paste the relevant defines from `wp-config-local.php` into the existing `wp-config.php`, preserving any plugin-injected blocks (Solid Security, iThemes Security, etc.) that the user wants to keep.
+>
+> Surfacing this is non-optional. If you skip it and the live `wp-config.php` is stale, every subsequent step that touches the runtime config (defines, gates, salts) will appear to succeed but produce no effect — and the symptom is silent: stage_file_proxy no-ops, environment-type checks don't fire, etc.
+
 If the user has an existing `wp-config.php` they want to keep, leave it alone and just add the `wp-config-override.php` + a `require_once` at the end of their `wp-config.php` (before `wp-settings.php`).
 
 **On template drift:** the `pre-start` hook only seeds `wp-config.php` when the file is *missing*. Once seeded, `wp-config.php` diverges from `wp-config-local.php` over time — plugins like Solid Security / iThemes Security prepend their own config blocks, and users may hand-edit. This is expected, but it means later edits to `wp-config-local.php` do NOT propagate to the live file. If you change the template (e.g. to add a `defined()` guard), also apply the same edit to the user's live `wp-config.php`, or tell them to `rm wp-config.php && ddev start` to regenerate (they'll lose any plugin-injected blocks, which the plugin will re-add on next admin load).
@@ -350,66 +357,103 @@ Step 5 must have run first. The `wp-config-local.php` template ships with two pi
 
    `WP_ENVIRONMENT_TYPE` is checked as a raw constant (not via `wp_get_environment_type()`) because WordPress core isn't loaded yet at wp-config.php parse time. If the constant is **undefined**, the gate fails closed — that matches core's own default (`wp_get_environment_type()` returns `'production'` when unset), so prod is safe by omission.
 
-### Step 5b.3 — Install the plugin
+> ⚠️ **Important caveat about the constant gate.** The current upstream [alleyinteractive/stage-file-proxy](https://github.com/alleyinteractive/stage-file-proxy) (`Version: 100`) reads its origin URL from `wp_options.sfp_url` via `get_option( 'sfp_url' )`. **It does not consult the `STAGE_FILE_PROXY_URL` constant.** With that plugin, the gate above is decorative — defining the constant does not enable the proxy, and not defining it does not disable it. The actual runtime config lives in a DB option (see Step 5b.3 below).
+>
+> Some forks (notably Automattic VIP's) do read the constant. If you switch the plugin, verify by reading the plugin source for `STAGE_FILE_PROXY_URL`; if the constant is consulted, the gate becomes actually protective and the constant-vs-option discussion in Step 5b.3 collapses.
+>
+> Why we still ship the constant in the template: defense-in-depth for forks that respect it, plus it's a useful runtime signal for project code that wants to branch on "is this a local proxy environment?". It does no harm in the alleyinteractive case — just doesn't gate anything.
+
+### Step 5b.3 — Install and configure the plugin
 
 ```bash
 ddev composer require alleyinteractive/stage-file-proxy
 ```
 
-If the project isn't composer-managed, fall back to manual install in `wp-content/plugins/`. The plugin code is inert without `STAGE_FILE_PROXY_URL` defined, so shipping it to prod is fine — same posture as Drupal's `stage_file_proxy` module in Step 4d.
+If the project isn't composer-managed, fall back to manual install in `wp-content/plugins/` (e.g. `git clone https://github.com/alleyinteractive/stage-file-proxy.git` into that dir, then remove the nested `.git`).
 
-### Step 5b.4 — Activate the plugin everywhere; rely on the constant gate
-
-WordPress stores active plugins in `wp_options.active_plugins`, which gets pulled down by `ddev pull` from prod. Unlike Drupal, this state is **not version-controlled** — there's no `core.extension.yml` equivalent and no `drush cim` to drift-correct it. That changes the calculus for where the safety lives.
-
-**Recommended (WordPress default): activate stage-file-proxy on prod too, and rely on the `STAGE_FILE_PROXY_URL` constant gate as the sole safety.**
+**Then configure the origin URL** (alleyinteractive plugin — skip if you switched to a constant-respecting fork):
 
 ```bash
-ddev wp plugin install stage-file-proxy --activate   # local
-wp plugin activate stage-file-proxy                  # prod (one-time, in prod's environment)
+ddev wp plugin activate stage-file-proxy
+ddev wp option update sfp_url https://www.{{PROD_DOMAIN}}/wp-content/uploads/
 ```
 
-No `post-import-db` activation hook needed.
+Two non-obvious gotchas:
 
-Why this is the right default in WordPress (different from Drupal):
+- **The trailing `/wp-content/uploads/` matters, not optional.** The plugin appends a *relative* path (without `/wp-content/uploads/`) to whatever URL is stored in `sfp_url`. If you set it to just `https://www.example.org`, the redirects come out as `https://www.example.org2022/01/Admin.svg` — missing slash, missing path prefix, broken.
+- **Without `sfp_url` set, the plugin dies loudly.** Any request that reaches the plugin's dispatcher with no `sfp_url` produces a `die( 'SFP tried to load, but encountered an error' )`. This is the symptom you'll see if `sfp_url` ever ends up empty (which it will after every `ddev pull` — see Step 5b.4).
 
-- **The constant gate is the *actual* safety.** `STAGE_FILE_PROXY_URL` lives in `wp-config.php`, which IS version-controlled (via the `wp-config-local.php` seed on local, and prod's hand-managed `wp-config.php` simply never defines it). The plugin's subscriber bails immediately on the undefined constant — same posture as Drupal's `$config['stage_file_proxy.settings']['origin'] = ''` line in `settings.php`.
-- **"Deactivated in prod" is policy, not enforcement.** Any admin can flip the plugin on in the WP UI and nothing reverts them. There's no version-controlled source of truth to drift-correct against. Calling this "defense in depth" oversells it.
-- **DB direction-of-travel risk.** If anyone ever pushes a local DB upward (launches, migrations, content syncs), the local activation flag goes with it — and now prod has it active and you may not notice. Activating everywhere removes this footgun.
-- **Honesty.** The plugins admin page reflects what's actually installed in every environment. No "why is this deactivated here?" confusion.
-- **Operational simplicity.** No post-import hook to silently fail and leave you wondering why local file fetches stopped working.
+On production, leaving `sfp_url` unset is harmless **because nginx serves uploads files directly without invoking PHP**; the plugin only runs when a request falls through to `index.php`, which on prod means "the file is genuinely missing." See Step 5b.5 for the full safety story.
 
-**Alternative (rarely worth it): deactivate in prod's DB, re-activate locally via hook.**
+### Step 5b.4 — Wire `sfp_url` (and optionally activation) into `post-import-db`
 
-Only choose this if the user has a strong organizational reason to keep the plugins page on prod "clean" (e.g. compliance audits that scan active-plugin lists, or a deploy pipeline that already hard-sets `active_plugins` from a manifest — making the deactivation actually enforced).
+Both `wp_options.active_plugins` and `wp_options.sfp_url` get pulled down by `ddev pull` from prod. Whatever you set locally is wiped on every pull and replaced with prod's value. That has to be reasserted via a `post-import-db` hook, or local file fetches break silently after the next pull.
+
+**`sfp_url` always needs the hook.** Prod's `sfp_url` is empty (you didn't configure it on prod — see Step 5b.3 and Step 5b.5), so every pull resets local back to empty and the plugin starts `die()`-ing on missing-file requests.
+
+**Whether the activation row also needs the hook depends on which posture you pick:**
+
+#### Posture A (Recommended): activate stage-file-proxy on prod too
+
+```bash
+ddev wp plugin activate stage-file-proxy   # local
+wp plugin activate stage-file-proxy        # prod (one-time, in prod's environment)
+```
+
+Then in `.ddev/config.yaml`:
+
+```yaml
+hooks:
+  post-import-db:
+    # ... existing search-replace lines from Step 4c ...
+    - exec: wp option update sfp_url https://www.{{PROD_DOMAIN}}/wp-content/uploads/
+```
+
+Place it after the search-replace lines but before `wp cache flush`.
+
+Why activating on prod is fine despite "the plugin is for local-only use":
+
+- **Prod's runtime is structurally inert.** On prod, `/wp-content/uploads/<file>` requests are served by nginx directly from disk via `try_files $uri ...`. PHP is only invoked when the file is genuinely absent — and at that point the plugin sees an empty `sfp_url` and `die()`s with an obvious error message that's easy to spot in logs. No outbound HTTP. No data exfiltration vector. Nothing happens for normal traffic.
+- **No DB direction-of-travel footgun.** If anyone ever pushes a local DB upward (launches, content syncs, etc.), the local activation flag goes with it. If prod is already showing the plugin as active, that push is a no-op for activation state; if prod is showing it as deactivated, the push silently re-activates it and you may not notice. Activating-everywhere removes that asymmetry.
+- **Honesty.** The plugins admin page reflects what's actually installed in every environment.
+
+#### Posture B: deactivate on prod, reactivate via hook
+
+Only useful if the user has a strong organisational reason to keep prod's plugins list "clean" — e.g. a compliance audit that scans active plugins, or a deploy pipeline that hard-sets `active_plugins` from a manifest so the deactivation is actually enforced.
 
 ```yaml
 hooks:
   post-import-db:
     # ... existing search-replace lines from Step 4c ...
     - exec: wp plugin activate stage-file-proxy
+    - exec: wp option update sfp_url https://www.{{PROD_DOMAIN}}/wp-content/uploads/
 ```
 
-Place it after the search-replace lines but before `wp cache flush`. Be aware this adds a moving part: if the hook silently fails or someone runs `ddev import-db` without it, local file fetches break with no clear signal pointing at the plugin state.
+Both lines required — without the activation line, the pull leaves the plugin inactive; without the `sfp_url` line, the plugin is active but dies on every miss. Adds an extra moving part that Posture A doesn't have: if the activation line ever silently fails (plugin slug typo, plugin file missing, etc.), local file fetches break with no clear pointer to plugin state.
 
 ### Step 5b.5 — How prod stays safe (explain to the user)
 
-Same shape as Step 4d.8 for Drupal — the runtime safety is the constant gate. The layers (assuming the recommended "active everywhere" posture from Step 5b.4):
+The real protection is **structural, not config-gated**: on prod, nginx serves `/wp-content/uploads/<file>` directly from disk via `try_files $uri ...`. PHP is only invoked when the file is genuinely missing. The plugin only fires inside PHP — so on normal prod traffic (where uploads files exist on disk), the plugin's dispatcher code never runs.
 
-| Deployed | Functional on prod? | Notes |
+The layers (assuming Posture A — "active everywhere" — from Step 5b.4):
+
+| Layer | Behaviour on prod | Notes |
 |---|---|---|
-| Plugin code (composer) | inert | no `STAGE_FILE_PROXY_URL` → subscriber bails on every request |
-| `wp-config-local.php` seed (contains prod URL as a literal) | inert | never `include`d on prod; prod's `wp-config.php` is hand-written or templated by deploy, not seeded from this file |
-| `STAGE_FILE_PROXY_URL` constant | never defined on prod | gated on `WP_ENVIRONMENT_TYPE !== 'production'`, which is also never set on prod |
-| Plugin activation row in `wp_options` | active on prod too | runtime is inert anyway; activation is honest and avoids DB-direction-of-travel footguns |
+| nginx `try_files` for `/wp-content/uploads/<file>` | serves file directly, no PHP | This is the primary safety. PHP doesn't run, plugin doesn't run. |
+| Plugin code (composer/in-tree) | loaded into WP but never dispatched | The early-bind check (`if ( stripos( $_SERVER['REQUEST_URI'], '/wp-content/uploads/' ) !== false ) sfp_expect();`) only matters if PHP is invoked for that path. |
+| `wp_options.sfp_url` on prod | empty (never set) | If a genuinely-missing-file request ever does reach PHP, the plugin sees empty `sfp_url` and `die()`s with an explicit error message rather than doing anything. Loud, obvious failure mode; no outbound HTTP. |
+| `STAGE_FILE_PROXY_URL` constant | never defined on prod | Gated on `WP_ENVIRONMENT_TYPE !== 'production'`. Decorative for the alleyinteractive plugin (it doesn't read this constant); actually protective for forks that do. |
+| `wp-config-local.php` seed (contains prod URL as a literal) | never `include`d on prod | Prod's `wp-config.php` is hand-written or templated by deploy tooling, not seeded from this file. |
 
 **What does NOT deploy to prod:**
 
-- `wp-config.php` — gitignored, only exists on dev machines after `ddev start` runs the pre-start copy
-- `WP_ENVIRONMENT_TYPE` — only defined inside `wp-config-local.php`, which only lands on local
-- `STAGE_FILE_PROXY_URL` — gated behind the env-type check, so even if it leaked into a committed file it wouldn't fire on prod
+- `wp-config.php` — gitignored, only exists on dev machines after `ddev start` runs the pre-start copy.
+- `WP_ENVIRONMENT_TYPE` — only defined inside `wp-config-local.php`, which only lands on local.
+- A non-empty `sfp_url` option — you never set it on prod; `ddev pull` only goes local-←-prod, so prod's empty state is authoritative.
 
-**Bottom line:** the design fails closed at the constant gate. The plugin's subscriber checks `STAGE_FILE_PROXY_URL`; on prod the constant is undefined; the subscriber returns. Both `WP_ENVIRONMENT_TYPE` and `STAGE_FILE_PROXY_URL` live in version-controlled code that prod never executes — neither can be flipped on by an admin clicking around in `wp-admin`. That's the entire safety story, and it matches the Drupal posture (where `$config['origin'] = ''` in `settings.php` is the same kind of code-level gate).
+**Bottom line:** the design fails *quietly* on prod under normal traffic (nginx serves the files, plugin never runs) and fails *loudly* on prod under abnormal traffic (a missing-file request reaches PHP, the plugin dies with an explicit error — easy to spot in logs, no security impact). It's not a code-level gate the way Drupal's `$config['origin'] = ''` is, but it doesn't need to be — the structural property (files exist on prod) does the work.
+
+If you want a stronger code-level gate, switch to a fork that reads `STAGE_FILE_PROXY_URL` and the constant block in `wp-config-local.php` becomes actually protective. The template already ships the gate for that case.
 
 ## Step 6 — Tell the user what's next
 
