@@ -358,11 +358,30 @@ ddev composer require alleyinteractive/stage-file-proxy
 
 If the project isn't composer-managed, fall back to manual install in `wp-content/plugins/`. The plugin code is inert without `STAGE_FILE_PROXY_URL` defined, so shipping it to prod is fine — same posture as Drupal's `stage_file_proxy` module in Step 4d.
 
-### Step 5b.4 — Activate the plugin on local only
+### Step 5b.4 — Activate the plugin everywhere; rely on the constant gate
 
-WordPress stores active plugins in `wp_options.active_plugins`, which gets pulled down by `ddev pull` from prod. Two approaches:
+WordPress stores active plugins in `wp_options.active_plugins`, which gets pulled down by `ddev pull` from prod. Unlike Drupal, this state is **not version-controlled** — there's no `core.extension.yml` equivalent and no `drush cim` to drift-correct it. That changes the calculus for where the safety lives.
 
-**Recommended:** Leave the plugin deactivated in prod's DB. Add an activation step to the `post-import-db` hook from Step 4c, so every `ddev pull` reactivates it locally after the prod DB lands:
+**Recommended (WordPress default): activate stage-file-proxy on prod too, and rely on the `STAGE_FILE_PROXY_URL` constant gate as the sole safety.**
+
+```bash
+ddev wp plugin install stage-file-proxy --activate   # local
+wp plugin activate stage-file-proxy                  # prod (one-time, in prod's environment)
+```
+
+No `post-import-db` activation hook needed.
+
+Why this is the right default in WordPress (different from Drupal):
+
+- **The constant gate is the *actual* safety.** `STAGE_FILE_PROXY_URL` lives in `wp-config.php`, which IS version-controlled (via the `wp-config-local.php` seed on local, and prod's hand-managed `wp-config.php` simply never defines it). The plugin's subscriber bails immediately on the undefined constant — same posture as Drupal's `$config['stage_file_proxy.settings']['origin'] = ''` line in `settings.php`.
+- **"Deactivated in prod" is policy, not enforcement.** Any admin can flip the plugin on in the WP UI and nothing reverts them. There's no version-controlled source of truth to drift-correct against. Calling this "defense in depth" oversells it.
+- **DB direction-of-travel risk.** If anyone ever pushes a local DB upward (launches, migrations, content syncs), the local activation flag goes with it — and now prod has it active and you may not notice. Activating everywhere removes this footgun.
+- **Honesty.** The plugins admin page reflects what's actually installed in every environment. No "why is this deactivated here?" confusion.
+- **Operational simplicity.** No post-import hook to silently fail and leave you wondering why local file fetches stopped working.
+
+**Alternative (rarely worth it): deactivate in prod's DB, re-activate locally via hook.**
+
+Only choose this if the user has a strong organizational reason to keep the plugins page on prod "clean" (e.g. compliance audits that scan active-plugin lists, or a deploy pipeline that already hard-sets `active_plugins` from a manifest — making the deactivation actually enforced).
 
 ```yaml
 hooks:
@@ -371,20 +390,18 @@ hooks:
     - exec: wp plugin activate stage-file-proxy
 ```
 
-Place it after the search-replace lines but before `wp cache flush` (so the cache flush also clears anything the plugin's activation hook touched).
-
-**Alternative:** If the user can't or won't keep it deactivated in prod's DB (e.g. they manage activation via a deploy script that hard-sets the list), they can rely on the `STAGE_FILE_PROXY_URL` gate alone. The plugin runs on every request in prod, sees no URL, and bails. Same end state as the Drupal empty-origin pattern. Tell them this is acceptable but less defense-in-depth than keeping it deactivated.
+Place it after the search-replace lines but before `wp cache flush`. Be aware this adds a moving part: if the hook silently fails or someone runs `ddev import-db` without it, local file fetches break with no clear signal pointing at the plugin state.
 
 ### Step 5b.5 — How prod stays safe (explain to the user)
 
-Same shape as Step 4d.8 for Drupal. The layers:
+Same shape as Step 4d.8 for Drupal — the runtime safety is the constant gate. The layers (assuming the recommended "active everywhere" posture from Step 5b.4):
 
 | Deployed | Functional on prod? | Notes |
 |---|---|---|
-| Plugin code (composer) | inert | no `STAGE_FILE_PROXY_URL` → no-op |
+| Plugin code (composer) | inert | no `STAGE_FILE_PROXY_URL` → subscriber bails on every request |
 | `wp-config-local.php` seed (contains prod URL as a literal) | inert | never `include`d on prod; prod's `wp-config.php` is hand-written or templated by deploy, not seeded from this file |
 | `STAGE_FILE_PROXY_URL` constant | never defined on prod | gated on `WP_ENVIRONMENT_TYPE !== 'production'`, which is also never set on prod |
-| Plugin activation row in `wp_options` | deactivated in prod | re-activated locally via `post-import-db` hook after each pull |
+| Plugin activation row in `wp_options` | active on prod too | runtime is inert anyway; activation is honest and avoids DB-direction-of-travel footguns |
 
 **What does NOT deploy to prod:**
 
@@ -392,7 +409,7 @@ Same shape as Step 4d.8 for Drupal. The layers:
 - `WP_ENVIRONMENT_TYPE` — only defined inside `wp-config-local.php`, which only lands on local
 - `STAGE_FILE_PROXY_URL` — gated behind the env-type check, so even if it leaked into a committed file it wouldn't fire on prod
 
-**Bottom line:** the design fails closed in three independent ways. An attacker (or an accidental commit of `wp-config.php`) would need to defeat all three — the env-type check, the constant gate, and the deactivated plugin row — before stage_file_proxy could make an outbound request from prod.
+**Bottom line:** the design fails closed at the constant gate. The plugin's subscriber checks `STAGE_FILE_PROXY_URL`; on prod the constant is undefined; the subscriber returns. Both `WP_ENVIRONMENT_TYPE` and `STAGE_FILE_PROXY_URL` live in version-controlled code that prod never executes — neither can be flipped on by an admin clicking around in `wp-admin`. That's the entire safety story, and it matches the Drupal posture (where `$config['origin'] = ''` in `settings.php` is the same kind of code-level gate).
 
 ## Step 6 — Tell the user what's next
 
