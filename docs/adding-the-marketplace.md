@@ -69,7 +69,23 @@ Then update any installed plugins:
 /plugin update <plugin-name>
 ```
 
-## 4. Removing things
+## 4. Reload plugins after changes
+
+Claude Code loads plugin definitions (commands, skills, hooks, MCP servers) at session start. If you install, update, or uninstall a plugin **mid-session**, the new state won't take effect until you reload:
+
+```
+/plugins-reload
+```
+
+Run this any time:
+
+- You just ran `/plugin install` or `/plugin update` and the new commands/skills aren't showing up.
+- You just ran `/plugin marketplace update` and want the updated plugin definitions to apply.
+- You edited a plugin's files locally (e.g. iterating on a `SKILL.md` or command in this repo) and want Claude to pick up the changes without restarting.
+
+You'll likely run this more often than you'd expect — it's the most common gotcha for new users. If a plugin "isn't working," reload first before debugging anything else.
+
+## 5. Removing things
 
 Uninstall a single plugin:
 
