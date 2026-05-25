@@ -1,0 +1,9 @@
+{
+  "name": "next-due-retainer",
+  "version": "0.1.0",
+  "description": "Pick up the next due retainer work item from the Affinity Bridge GitLab 'Retainers and Maintenance' group, assign it to the user, and label it In Progress.",
+  "author": {
+    "name": "Mark Labrecque",
+    "email": "mark@affinitybridge.com"
+  }
+}

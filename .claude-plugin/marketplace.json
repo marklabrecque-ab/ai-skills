@@ -26,6 +26,11 @@
       "description": "Set up a functional DDEV environment for Drupal or WordPress projects."
     },
     {
+      "name": "next-due-retainer",
+      "source": "./next-due-retainer",
+      "description": "Pick up the next due retainer work item from the Affinity Bridge GitLab 'Retainers and Maintenance' group: assign it to the user, label it In Progress, and flag late-comment activity for review."
+    },
+    {
       "name": "screenshot-skill-init",
       "source": "./screenshot-skill-init",
       "description": "Scaffold project-specific screenshot + compare skills for visual regression."
