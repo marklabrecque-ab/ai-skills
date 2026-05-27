@@ -41,11 +41,6 @@
       "description": "Fill out Harvest timesheets from daily log files; includes a post-commit hook that records commits to a daily report."
     },
     {
-      "name": "value-estimates",
-      "source": "./value-estimates",
-      "description": "Generate value-based estimate reports comparing GitLab ticket estimates to Harvest actuals."
-    },
-    {
       "name": "wp-maintenance-tools",
       "source": "./wp-maintenance-tools",
       "description": "Maintenance skills for WordPress projects on DDEV. Bundles wordpress-update-check: a per-plugin risk report based on actual code diffs between installed and incoming versions."
