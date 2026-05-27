@@ -28,8 +28,16 @@ $table_prefix = "wp_";
 // into a committed file, prod (where WP_ENVIRONMENT_TYPE is undefined or
 // 'production') bails. We check the constant directly rather than calling
 // wp_get_environment_type() because WordPress core isn't loaded yet at
-// wp-config parse time. The alleyinteractive/stage-file-proxy plugin reads
-// STAGE_FILE_PROXY_URL and no-ops when it's undefined.
+// wp-config parse time.
+//
+// NOTE: the current upstream alleyinteractive/stage-file-proxy (Version: 100)
+// does NOT read this constant — it reads wp_options.sfp_url via get_option().
+// This define is decorative for that plugin (kept as defense-in-depth for
+// forks that respect the constant, e.g. Automattic VIP's, and as a runtime
+// signal for project code that wants to branch on "is this a local proxy
+// environment?"). The runtime configuration that actually enables fetching
+// lives in the sfp_url DB option, set via a post-import-db hook in
+// .ddev/config.yaml. See SKILL.md Step 5b.3 / 5b.4.
 if (defined("WP_ENVIRONMENT_TYPE") && WP_ENVIRONMENT_TYPE !== "production") {
     if (!defined("STAGE_FILE_PROXY_URL")) define("STAGE_FILE_PROXY_URL", "{{STAGE_FILE_PROXY_URL}}");
 }
