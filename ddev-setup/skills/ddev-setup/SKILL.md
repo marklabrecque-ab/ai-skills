@@ -371,25 +371,27 @@ ddev composer require alleyinteractive/stage-file-proxy
 
 If the project isn't composer-managed, fall back to manual install in `wp-content/plugins/` (e.g. `git clone https://github.com/alleyinteractive/stage-file-proxy.git` into that dir, then remove the nested `.git`).
 
-**Then configure the origin URL** (alleyinteractive plugin — skip if you switched to a constant-respecting fork):
+**Then configure the origin URL and mode** (alleyinteractive plugin — skip if you switched to a constant-respecting fork):
 
 ```bash
 ddev wp plugin activate stage-file-proxy
-ddev wp option update sfp_url https://www.{{PROD_DOMAIN}}/wp-content/uploads/
+ddev wp option update sfp_url  https://www.{{PROD_DOMAIN}}/wp-content/uploads/
+ddev wp option update sfp_mode download
 ```
 
-Two non-obvious gotchas:
+Three non-obvious gotchas:
 
 - **The trailing `/wp-content/uploads/` matters, not optional.** The plugin appends a *relative* path (without `/wp-content/uploads/`) to whatever URL is stored in `sfp_url`. If you set it to just `https://www.example.org`, the redirects come out as `https://www.example.org2022/01/Admin.svg` — missing slash, missing path prefix, broken.
 - **Without `sfp_url` set, the plugin dies loudly.** Any request that reaches the plugin's dispatcher with no `sfp_url` produces a `die( 'SFP tried to load, but encountered an error' )`. This is the symptom you'll see if `sfp_url` ever ends up empty (which it will after every `ddev pull` — see Step 5b.4).
+- **Use `download` mode, not the default `header` mode.** The plugin's default mode emits a 302 redirect from local to prod for every missing upload. The 302 response carries WordPress's default `Content-Type: text/html`, and Chromium's Opaque Response Blocking treats that as a hostile cross-origin response for `<img>` fetches — images silently fail with `net::ERR_BLOCKED_BY_ORB` (Network tab only; nothing in the JS console). `download` mode has the plugin fetch the file server-side and serve it from the local origin with the correct `image/*` content-type, which sidesteps ORB *and* builds a local upload cache on first hit. Firefox/Safari don't have ORB and won't show the symptom, so this often only surfaces once someone tries to view the site in Chrome.
 
 On production, leaving `sfp_url` unset is harmless **because nginx serves uploads files directly without invoking PHP**; the plugin only runs when a request falls through to `index.php`, which on prod means "the file is genuinely missing." See Step 5b.5 for the full safety story.
 
 ### Step 5b.4 — Wire `sfp_url` (and optionally activation) into `post-import-db`
 
-Both `wp_options.active_plugins` and `wp_options.sfp_url` get pulled down by `ddev pull` from prod. Whatever you set locally is wiped on every pull and replaced with prod's value. That has to be reasserted via a `post-import-db` hook, or local file fetches break silently after the next pull.
+Both `wp_options.active_plugins`, `wp_options.sfp_url`, and `wp_options.sfp_mode` get pulled down by `ddev pull` from prod. Whatever you set locally is wiped on every pull and replaced with prod's value. That has to be reasserted via a `post-import-db` hook, or local file fetches break silently after the next pull.
 
-**`sfp_url` always needs the hook.** Prod's `sfp_url` is empty (you didn't configure it on prod — see Step 5b.3 and Step 5b.5), so every pull resets local back to empty and the plugin starts `die()`-ing on missing-file requests.
+**`sfp_url` and `sfp_mode` always need the hook.** Prod's `sfp_url` is empty (you didn't configure it on prod — see Step 5b.3 and Step 5b.5), so every pull resets local back to empty and the plugin starts `die()`-ing on missing-file requests. Same for `sfp_mode` — without it, the option falls back to `header` and Chrome ORB starts blocking images again.
 
 **Whether the activation row also needs the hook depends on which posture you pick:**
 
@@ -406,10 +408,11 @@ Then in `.ddev/config.yaml`:
 hooks:
   post-import-db:
     # ... existing search-replace lines from Step 4c ...
-    - exec: wp option update sfp_url https://www.{{PROD_DOMAIN}}/wp-content/uploads/
+    - exec: wp option update sfp_url  https://www.{{PROD_DOMAIN}}/wp-content/uploads/
+    - exec: wp option update sfp_mode download
 ```
 
-Place it after the search-replace lines but before `wp cache flush`.
+Place both lines after the search-replace lines but before `wp cache flush`.
 
 Why activating on prod is fine despite "the plugin is for local-only use":
 
@@ -426,10 +429,11 @@ hooks:
   post-import-db:
     # ... existing search-replace lines from Step 4c ...
     - exec: wp plugin activate stage-file-proxy
-    - exec: wp option update sfp_url https://www.{{PROD_DOMAIN}}/wp-content/uploads/
+    - exec: wp option update sfp_url  https://www.{{PROD_DOMAIN}}/wp-content/uploads/
+    - exec: wp option update sfp_mode download
 ```
 
-Both lines required — without the activation line, the pull leaves the plugin inactive; without the `sfp_url` line, the plugin is active but dies on every miss. Adds an extra moving part that Posture A doesn't have: if the activation line ever silently fails (plugin slug typo, plugin file missing, etc.), local file fetches break with no clear pointer to plugin state.
+All three lines required — without the activation line, the pull leaves the plugin inactive; without the `sfp_url` line, the plugin is active but dies on every miss; without the `sfp_mode` line, Chrome ORB starts blocking proxied images. Adds an extra moving part that Posture A doesn't have: if the activation line ever silently fails (plugin slug typo, plugin file missing, etc.), local file fetches break with no clear pointer to plugin state.
 
 ### Step 5b.5 — How prod stays safe (explain to the user)
 
