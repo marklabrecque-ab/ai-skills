@@ -1,6 +1,6 @@
 ---
 name: next-due-retainer
-description: "Find the next due retainer work item on Affinity Bridge's self-hosted GitLab (git.affinitybridge.com) under the 'Retainers and Maintenance' group, assign it to the user, and label it 'In Progress'. Use whenever the user asks for the next retainer to work on, says 'what retainer is next', 'pick up the next retainer', 'start the next retainer', or similar. Selection priority: issues already assigned to the user (earliest due_date wins), then unassigned open issues without the 'In Progress' label (earliest due_date wins). Excludes the 'mainwp' project. After picking, scans the three most recent comments and flags the issue for review if any comment was posted after the issue's due_date."
+description: "Find the next due retainer work item on Affinity Bridge's self-hosted GitLab (git.affinitybridge.com) under the 'Retainers and Maintenance' group, assign it to the user, and label it 'In Progress'. Use whenever the user asks for the next retainer to work on, says 'what retainer is next', 'pick up the next retainer', 'start the next retainer', or similar. Selection priority: issues already assigned to the user without the 'In Progress' label (earliest due_date wins), then unassigned open issues without the 'In Progress' label (earliest due_date wins). Always skips issues already labeled 'In Progress'. Excludes the 'mainwp' project. After picking, scans the three most recent comments and flags the issue for review if any comment was posted after the issue's due_date."
 ---
 
 # next-due-retainer
@@ -46,12 +46,11 @@ If neither resolution works (no env var, `glab api user` fails), surface the err
    Filter out:
    - Any issue whose `references.full` (or `project_id`) is the `mainwp` project.
    - Any issue with no `due_date` set (cannot rank it).
+   - Any issue whose `labels` includes `In Progress` — these are already being worked on and should never be selected, regardless of assignee.
 
-2. **Priority pass — already mine.** From the filtered list, pick the issue with the earliest `due_date` whose `assignees` includes the resolved current-user username (see *Resolving the current user*). If found, that's the pick. (It's fine if it already has the `In Progress` label — just keep it.)
+2. **Priority pass — already mine.** From the filtered list, pick the issue with the earliest `due_date` whose `assignees` includes the resolved current-user username (see *Resolving the current user*). If found, that's the pick.
 
-3. **Fallback pass — fair game.** Otherwise, pick the earliest-due issue that satisfies *both*:
-   - `assignees` is empty, **and**
-   - `labels` does **not** include `In Progress`.
+3. **Fallback pass — fair game.** Otherwise, pick the earliest-due issue whose `assignees` is empty.
 
 4. If neither pass yields anything, report that to the user and stop. Do not modify any issue.
 
@@ -85,7 +84,7 @@ Once an issue is chosen:
 
    `<resolved_user_id>` comes from the cached resolution in *Resolving the current user* (the `.id` from `glab api user`, or — if the env var override was used — `glab api "users?username=<env-value>"` then `[0].id`). Don't hardcode any user id.
 
-   If the issue already carries the `In Progress` label, omit `add_labels` to avoid a no-op API noise. If it's already assigned to the user and already In Progress, skip the PUT entirely.
+   Selected issues never carry the `In Progress` label (it's a hard filter in step 1), so `add_labels=In Progress` always applies. If the issue is already assigned to the user, omit `assignee_ids` and only send `add_labels`.
 
 4. **Locate / clone the repo.** After the assignment has actually been made (or skipped because nothing needed changing), check the issue's `description` for a repository pointer:
 
