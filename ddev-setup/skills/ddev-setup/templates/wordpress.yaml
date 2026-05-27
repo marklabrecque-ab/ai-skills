@@ -54,7 +54,7 @@ db_pull_command:
 files_import_command:
   command: |
     set -eu -o pipefail
-    rsync -avz --size-only -e "ssh -p${ssh_port}" ${ssh_user}@${ssh_host}:${remote_path}/wp-content/uploads/ wp-content/uploads/
+    echo "Skipping files pull — this environment relies on stage-file-proxy wordpress plugin to fetch missing files from production on demand. See https://github.com/alleyinteractive/stage-file-proxy"
   service: host
 
 # Pushing a database or files to a remote environment is dangerous and not
