@@ -1,7 +1,7 @@
 {
   "name": "timesheet",
-  "version": "0.1.0",
-  "description": "Fill out Harvest timesheets from daily log markdown files. Includes a post-commit hook that appends each git commit to today's daily report.",
+  "version": "0.2.0",
+  "description": "Fill out Harvest timesheets from a multi-source daily log. Captures git commits (PostToolUse hook), Claude sessions (SessionEnd hook), and manual notes (worklog CLI) as JSONL, then enriches and denoises them at timesheet time.",
   "author": {
     "name": "Mark Labrecque",
     "email": "mark@affinitybridge.com"

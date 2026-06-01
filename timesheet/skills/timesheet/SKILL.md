@@ -114,7 +114,7 @@ End with a summary line: e.g., "3 weekdays with < 6 hours out of 22 weekdays in 
 
 ### Overview
 
-The user keeps daily work logs as markdown files. This skill reads those logs for a given date range, groups entries by ticket within project per day, matches each to a Harvest project, and creates one Harvest time entry per ticket per project per day — always `0.02h` (≈1 minute) as a placeholder the user adjusts to actuals later, with a combined summary comment covering all log entries for that ticket on that day. Multiple commits on the same ticket on the same day collapse into a single entry; commits without a ticket number are grouped together as one no-ticket entry per project per day; entries that touch multiple tickets duplicate (full placeholder per ticket — they don't split).
+The user's daily work log is a **multi-source, append-only** stream of events (`commit`, `session`, and `manual`) captured to `~/daily_reports/{date}.jsonl` (see *How the daily log is captured*). For a given date range this skill: reads the raw events, **enriches and denoises them** (Step 2.5 — drops ignored noise, summarizes Claude sessions, pulls GitLab activity, collapses duplicates), groups the resulting work items by ticket within project per day, matches each to a Harvest project, and creates one Harvest time entry per ticket per project per day — always `0.02h` (≈1 minute) as a placeholder the user adjusts to actuals later, with a combined summary comment covering all the day's work for that ticket. Multiple events on the same ticket on the same day collapse into a single entry; events without a ticket number are grouped together as one no-ticket entry per project per day; events that touch multiple tickets duplicate (full placeholder per ticket — they don't split).
 
 ## Credentials
 
@@ -128,7 +128,7 @@ These are exported from `~/.zshenv` (see `example.zshenv` in this skill director
 
 Read two files from `~/daily_reports/meta/`:
 
-- **`projects.yml`** — shared project map (used by every skill that touches Harvest / GitLab / daily logs). Each entry can carry: `harvest` (official name), `gitlab` (project path), `log_aliases` (tokens used in daily logs), `internal: true` (the daily admin / fallback project), `admin_task` (task name on the internal project), `excluded: true` (silently skip). Parse with PyYAML or a small custom parser — entries are simple key/value blocks.
+- **`projects.yml`** — shared project map (used by every skill that touches Harvest / GitLab / daily logs). Each entry can carry: `harvest` (official name), `gitlab` (project path), `log_aliases` (tokens used in daily logs), `internal: true` (the daily admin / fallback project), `admin_task` (task name on the internal project), `excluded: true` (silently skip). The file may also have a top-level `ignore:` list of glob patterns for raw noise (throwaway/test repos, scratch branches) — see the Enrichment step. Parse with PyYAML or a small custom parser — entries are simple key/value blocks.
 - **`local-context.md`** — per-machine bits that aren't shared (currently just the daily reports path; defaults to `~/daily_reports/`).
 
 If `projects.yml` is missing, tell the user to create `~/daily_reports/meta/projects.yml` (use `local-context.example.md` as a starting reference for `local-context.md`) and stop.
@@ -136,6 +136,19 @@ If `projects.yml` is missing, tell the user to create `~/daily_reports/meta/proj
 From `projects.yml`, derive:
 - **Excluded projects** — every entry with `excluded: true`. Match against log project names case-insensitively, against both `log_aliases` and `harvest` (when present).
 - **Internal project** — the single entry with `internal: true`. Its `harvest` value is the daily admin project; its `admin_task` is the task name to use.
+- **Ignore globs** — the top-level `ignore:` list (may be absent → empty). Used by the Enrichment step to drop raw-noise events before anything reaches Harvest.
+
+## How the daily log is captured (background)
+
+The daily log is a **multi-source, append-only** record. Three capturers write newline-delimited JSON (one event per line) to `~/daily_reports/{YYYY-MM-DD-Day}.jsonl`:
+
+- **`commit`** — a git commit (via the plugin's PostToolUse hook and/or a git-native post-commit shim; both dedupe on SHA). Fields: `repo`, `branch`, `tickets[]`, `sha`, `summary`.
+- **`session`** — a Claude Code session ended (SessionEnd hook). Fields: `cwd`, `repo`, `branch`, `transcript`, `session_id`, `reason`, `duration_s`, and `summary: null` — the summary is **deliberately left null for the Enrichment step to fill** by reading the transcript.
+- **`manual`** — the `worklog "…"` CLI, for work no hook sees (calls, meetings, review, research). Fields: `summary`, optional `project`, `tickets[]`.
+
+Every event has `ts` (ISO 8601) and `source`. Because the log is intentionally noisy (every commit, every session), the Enrichment step below is responsible for collapsing it into clean billable items.
+
+**Legacy:** logs written before the JSONL cutover are Markdown `{date}.md` files (see the Legacy Markdown appendix). Read both formats for the range.
 
 ## Step 1: Determine the date range
 
@@ -145,7 +158,7 @@ If the user hasn't specified dates, ask them what time period they want to log. 
 - "March 10-14"
 - A specific date like "Friday"
 
-Convert relative references to absolute dates. The daily report filenames follow the pattern `{YYYY-MM-DD}-{DayOfWeek}.md`.
+Convert relative references to absolute dates. Daily report filenames follow the pattern `{YYYY-MM-DD}-{DayOfWeek}.jsonl` (current) or `{YYYY-MM-DD}-{DayOfWeek}.md` (legacy).
 
 ## Step 2: Fetch all data in a single call
 
@@ -191,7 +204,11 @@ curl -s "https://api.harvestapp.com/v2/users/me/project_assignments?is_active=tr
   }]'
 
 echo "=== REPORTS ==="
-for f in ~/daily_reports/START_DATE-*.md ~/daily_reports/NEXT_DATE-*.md; do
+# Read JSONL (current) and .md (legacy) for each date in the range. List one
+# glob pair per date. JSONL is the raw multi-source event stream; .md is only
+# present for dates before the JSONL cutover.
+for f in ~/daily_reports/START_DATE-*.jsonl ~/daily_reports/START_DATE-*.md \
+         ~/daily_reports/NEXT_DATE-*.jsonl ~/daily_reports/NEXT_DATE-*.md; do
   [ -f "$f" ] && echo "--- $(basename "$f") ---" && cat "$f"
 done
 ```
@@ -200,25 +217,47 @@ done
 
 If a daily report file doesn't exist for a given date, skip it silently — weekends and days off won't have files.
 
+## Step 2.5: Enrichment — reconstruct and denoise the day
+
+The raw JSONL log is intentionally a firehose: every commit, every session, every `worklog` line. This step collapses it into a clean set of billable work items **before** any grouping or Harvest mapping. Run it per date over the events fetched in Step 2. Do the work with judgment (you are the model) — there is no rigid parser.
+
+Process events in this order:
+
+**1. Drop ignored noise.** Discard any event whose `repo` or `repo/branch` matches one of the **ignore globs** from `projects.yml` (case-insensitive). Also drop events whose project resolves to an `excluded: true` entry. Count what you dropped and report it in Step 7 — **never silently truncate.** (Example: `acr-localgit-*` sandbox commits.)
+
+**2. Summarize `session` events.** Each `source:"session"` event has `summary: null` by design. For each one:
+   - **If it is throwaway** — very short (`duration_s` under ~120s) *and* the same repo/day already has `commit` or `manual` events — drop it. The session only exists because you committed; counting it again would double-log.
+   - **Otherwise, summarize it.** Read its `transcript` file (JSONL; the user's asks are the `type:"user"` messages) and write a one-line summary of what was actually accomplished. Infer `tickets[]` (from branch name, transcript content, or commits in the same repo/day) and the project (from `cwd`/`repo`). Keep only billable substance; if the session was pure exploration with no real outcome, drop it.
+   - **Backstop:** if `transcript` is missing or unreadable, fall back to `"Claude session — <repo>/<branch>"` as the summary and let the user confirm in Step 4.
+
+**3. Pull GitLab activity (if available).** This catches review/triage work that never produced a local commit. If `glab` is on PATH (and a token is configured), pull the user's activity for the range:
+   ```bash
+   glab api "/events?after=START_MINUS_1&before=END_PLUS_1&per_page=100" 2>/dev/null
+   ```
+   Keep only meaningful actions (commented on / approved an MR, opened/closed/merged an MR, opened/closed an issue). For each, derive a work item: project from the event's GitLab project path matched against `projects.yml` `gitlab:`, ticket from the issue/MR iid, summary from the action + title. If `glab` is unavailable or unauthenticated, **skip this and note it in Step 7** ("GitLab activity not pulled — glab unavailable"). Never fail the run over it.
+
+**4. Merge, dedupe, collapse.** Combine the surviving `commit`, `session`, `manual`, and GitLab items. Collapse everything that refers to the same `(date, resolved-project, ticket)`:
+   - A session whose only outcome was commits you already have → folded in (no separate line).
+   - Multiple commits / a commit + a GitLab MR comment on the same ticket/day → one item whose summary is the **union** of their bullets (drop near-duplicate text).
+   - A `manual` entry with an explicit `project`/`tickets` is authoritative for its own mapping.
+
+The output of this step is a denoised list of work items, each with: a **date**, a **project hint** (`repo` or `project`), **`tickets[]`**, and one or more **summary bullets**. This feeds Step 3 exactly as the old per-`###`-entry list used to.
+
 ## Step 3: Parse and group entries
 
-Each log file contains entries under `###` headers. Entries include a project identifier in one of these formats:
-- `**Project**: project/name` or `**Project:** project/name`
-- `### date — project/name` (project in the header itself)
-- `Project: project/name` (plain text, no bold)
-- Freeform mention like `- sideproject / api` at the end
+Step 3 now operates on the **enriched work items** from Step 2.5, not raw log lines. Each item carries a project hint (`repo`/`project`), `tickets[]`, and summary bullet(s). (For **legacy `.md`** dates with no JSONL, parse entries first via the Legacy Markdown appendix, then treat each parsed entry as a work item here.)
 
-Extract ticket references from each entry. Sources, in priority order:
+Resolve each item's project hint to a project name (matching is finalized in Step 4). Then determine its tickets — sources in priority order:
 
-1. **`**Tickets:**` line** in the entry body (e.g. `**Tickets:** #189` or `**Tickets:** #189, #194`). Authoritative — use it and skip the regex scan.
-2. **Regex scan** of the entry body for `#NNN` patterns (`#189`, `(#189)`, `ticket #189`). Capture all distinct IDs.
-3. **No reference found.** Prompt the user inline: *"entry on YYYY-MM-DD '<header>' has no ticket — link one? (enter a `#NNN`, or press enter to leave unlinked)"*. If the user supplies a ticket, treat it as if it had been on a `**Tickets:**` line. If they skip, the entry goes into a no-ticket bucket for that (date, project).
+1. **The work item's `tickets[]`** (populated by capture or by Enrichment — from a commit subject, a `worklog -t`, a GitLab iid, or a session inference). Authoritative — use it and skip the regex scan. For legacy `.md` entries this is the `**Tickets:**` line.
+2. **Regex scan** of the item's summary bullet(s) for `#NNN` patterns (`#189`, `(#189)`, `ticket #189`). Capture all distinct IDs.
+3. **No reference found.** Prompt the user inline: *"entry on YYYY-MM-DD '<summary>' has no ticket — link one? (enter a `#NNN`, or press enter to leave unlinked)"*. If the user supplies a ticket, treat it as authoritative for this run. If they skip, the entry goes into a no-ticket bucket for that (date, project).
 
-Backfilling user-supplied tickets back into the markdown source is **out of scope** for now — see the Roadmap section. The prompt only collects the ticket for this run.
+Backfilling user-supplied tickets back into the source log is **out of scope** for now — see the Roadmap section. The prompt only collects the ticket for this run.
 
-**Multiple tickets on one entry** → duplicate the entry into each ticket bucket (do **not** split the placeholder). Each ticket gets its own full-placeholder entry; the same `###` header text appears as a list item under every ticket it touched.
+**Multiple tickets on one item** → duplicate the item into each ticket bucket (do **not** split the placeholder). Each ticket gets its own full-placeholder entry; the same summary bullet(s) appear under every ticket it touched.
 
-Group all entries by (date, project, ticket). Each group becomes a single Harvest time entry. For each group, format the notes as a list — one line per log entry, each prefixed with `- ` and a trailing newline. Use the `###` header title and/or commit subject (trimmed of timestamps, project names, and the leading `#NNN` token) as each list item. For example, for ticket #265:
+Group all items by (date, project, ticket). Each group becomes a single Harvest time entry. For each group, format the notes as a list — one bullet per summary line, each prefixed with `- ` and a trailing newline. Use the item's summary (trimmed of timestamps, project names, and the leading `#NNN` token) as each bullet. For example, for ticket #265:
 
 ```
 - Update site search placeholder to 'Search Island Health'
@@ -352,6 +391,7 @@ After all entries are created, show a final summary:
 - How many entries were created
 - Any that failed and why
 - Any log entries that were skipped (excluded projects, no project match, etc.)
+- **Enrichment summary** (from Step 2.5): how many raw events were dropped as ignored noise, how many sessions were summarized vs. dropped as throwaway, and whether GitLab activity was pulled (or skipped because `glab` was unavailable). Surfacing this keeps the denoising honest — the user can see nothing billable was silently discarded.
 
 ## Roadmap
 
@@ -360,3 +400,17 @@ Known follow-ups, not yet implemented:
 - **`**Tickets:**` line backfill.** When the user supplies a ticket via the inline prompt in Step 3, write a `**Tickets:** #NNN` line back into the source markdown so the file becomes self-describing for next time. Out of scope until the parser side is proven.
 - **`--backsync` mode.** Pull every Harvest entry for the past N days and write actual hours back into the matching daily report entry as a `**Hours:**` line, so the daily report mirrors Harvest at any point. Depends on per-ticket entries being stable (already true) and the sidecar (already in place).
 - **Variance persistence.** Extend the sidecar (or add `~/daily_reports/meta/estimates.json`) so each ticket carries `{estimate_hours, estimate_source, actual_hours, variance, computed_at}` over time, giving longitudinal accuracy data instead of point-in-time snapshots.
+
+## Appendix: Legacy Markdown format
+
+Dates logged **before the JSONL cutover** are Markdown files (`~/daily_reports/{YYYY-MM-DD-Day}.md`) instead of `.jsonl`. When the range includes such a date, parse it into work items as follows, then feed those items into Step 3 like any other:
+
+Each file contains entries under `###` headers. The project identifier appears in one of these forms:
+- `**Project**: project/name` or `**Project:** project/name`
+- `### HH:MM — project/name` (project in the header itself)
+- `Project: project/name` (plain text, no bold)
+- Freeform mention like `- sideproject / api` at the end
+
+For tickets, prefer a `**Tickets:** #NNN` (or `#NNN, #MMM`) line in the entry body — it is authoritative, equivalent to a work item's `tickets[]`. Otherwise regex-scan the entry body for `#NNN`. The `###` header title (minus the timestamp and project) becomes the item's summary bullet.
+
+This appendix is read-only history; nothing new is written in Markdown.
