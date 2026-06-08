@@ -23,6 +23,21 @@ if (file_exists(__DIR__ . "/wp-config-ddev.php")) {
 
 $table_prefix = "wp_";
 
+// Route WP Mail SMTP through DDEV's Mailpit when running under DDEV.
+// Constants beat the plugin's database-stored mailer settings (e.g. Mailgun
+// API), so dev mail can never leak to real recipients. Inbox is available
+// at https://<project>.ddev.site:8026. Harmless no-op if WP Mail SMTP is
+// not installed — the constants just sit unused.
+if (getenv("IS_DDEV_PROJECT") === "true") {
+    if (!defined("WPMS_ON"))           define("WPMS_ON", true);
+    if (!defined("WPMS_MAILER"))       define("WPMS_MAILER", "smtp");
+    if (!defined("WPMS_SMTP_HOST"))    define("WPMS_SMTP_HOST", "localhost");
+    if (!defined("WPMS_SMTP_PORT"))    define("WPMS_SMTP_PORT", 1025);
+    if (!defined("WPMS_SSL"))          define("WPMS_SSL", "");
+    if (!defined("WPMS_SMTP_AUTH"))    define("WPMS_SMTP_AUTH", false);
+    if (!defined("WPMS_SMTP_AUTOTLS")) define("WPMS_SMTP_AUTOTLS", false);
+}
+
 // stage_file_proxy: fetch missing uploads from production on demand.
 // Gated on WP_ENVIRONMENT_TYPE so that even if this define somehow leaked
 // into a committed file, prod (where WP_ENVIRONMENT_TYPE is undefined or

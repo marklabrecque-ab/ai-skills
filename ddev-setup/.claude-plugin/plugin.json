@@ -1,7 +1,7 @@
 {
   "name": "ddev-setup",
-  "version": "0.2.5",
-  "description": "Set up a functional DDEV environment for a Drupal or WordPress project: provider YAML, ddev auth ssh wiring, and WordPress wp-config bootstrap.",
+  "version": "0.4.0",
+  "description": "Set up a functional DDEV environment for a Drupal or WordPress project: provider YAML, ddev auth ssh wiring, WordPress wp-config bootstrap, and a required PII audit + post-import-db database sanitization.",
   "author": {
     "name": "Mark Labrecque",
     "email": "mark@affinitybridge.com"

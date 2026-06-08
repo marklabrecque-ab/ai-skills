@@ -1,0 +1,38 @@
+# OS-specific metadata
+.DS_Store
+
+# WordPress dynamic / generated files
+.htaccess
+{{WP_PREFIX}}wp-config.php
+{{WP_PREFIX}}wp-content/uploads/
+{{WP_PREFIX}}wp-content/upgrade/
+{{WP_PREFIX}}wp-content/blogs.dir/
+error_log
+wp-errors.log
+
+# Security plugins
+.user.ini
+wordfence-waf.php
+{{WP_PREFIX}}wp-content/wflogs/
+
+# Backup plugins
+{{WP_PREFIX}}wp-content/backup-db/
+{{WP_PREFIX}}wp-content/backups/
+{{WP_PREFIX}}wp-content/backwpup-*/
+{{WP_PREFIX}}wp-content/updraft/
+{{WP_PREFIX}}wp-content/aiowps_backups/
+{{WP_PREFIX}}wp-content/ai1wm-backups
+
+# Cache plugins / drop-ins
+{{WP_PREFIX}}wp-content/advanced-cache.php
+{{WP_PREFIX}}wp-content/cache/
+{{WP_PREFIX}}wp-content/db.php
+{{WP_PREFIX}}wp-content/object-cache.php
+{{WP_PREFIX}}wp-content/w3tc-config/
+{{WP_PREFIX}}wp-content/wp-cache-config.php
+{{WP_PREFIX}}wp-content/wp-rocket-config/
+*.sass-cache/
+
+# Per-environment WP-CLI config (the committed one lives in .ddev/homeadditions/)
+/wp-cli.yaml
+{{WP_CLI_SUBDIR_LINE}}
